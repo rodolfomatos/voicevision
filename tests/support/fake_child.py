@@ -21,6 +21,15 @@ BINARY = "binary"
 DIE_MID_WRITE = "die-mid-write"
 NOOP = "noop"
 
+# whisper.cpp stand-ins
+WHISPER_TRANSCRIPT = "whisper-transcript"
+WHISPER_TIMESTAMPS = "whisper-timestamps"
+WHISPER_EMPTY = "whisper-empty"
+WHISPER_BLANK_AUDIO = "whisper-blank-audio"
+WHISPER_TO_FILE = "whisper-to-file"
+WHISPER_BAD_MODEL = "whisper-bad-model"
+WHISPER_ECHO_WAV = "whisper-echo-wav"
+
 _SCRIPT = textwrap.dedent(
     """
     import os, sys, time
@@ -50,6 +59,30 @@ _SCRIPT = textwrap.dedent(
         os._exit(9)
     elif behavior == "noop":
         pass
+    elif behavior == "whisper-transcript":
+        sys.stdout.buffer.write(b" hello there general kenobi ")
+    elif behavior == "whisper-timestamps":
+        # What whisper.cpp prints without -nt being honoured.
+        sys.stdout.buffer.write(
+            b"\\n[00:00:00.000 --> 00:00:02.500]   Hello there.\\n"
+            b"[00:00:02.500 --> 00:00:05.000]   General Kenobi.\\n"
+        )
+    elif behavior == "whisper-empty":
+        # Silence: a valid run with nothing recognised.
+        sys.stdout.buffer.write(b"\\n\\n")
+    elif behavior == "whisper-blank-audio":
+        sys.stdout.buffer.write(b"[BLANK_AUDIO]\\n you are eating a shoe \\n")
+    elif behavior == "whisper-to-file":
+        # Some builds report the transcript file instead of writing to stdout.
+        sys.stdout.buffer.write(b"\\n/transcript.txt\\n")
+    elif behavior == "whisper-bad-model":
+        sys.stderr.buffer.write(
+            b"error: failed to open model file: unable to load model\\n"
+        )
+        sys.exit(1)
+    elif behavior == "whisper-echo-wav":
+        # Echo the stdin length so the test can prove the WAV arrived intact.
+        sys.stdout.buffer.write(str(len(data)).encode())
     else:
         sys.stderr.buffer.write(b"unknown behavior: %s\\n" % behavior.encode())
         sys.exit(2)
