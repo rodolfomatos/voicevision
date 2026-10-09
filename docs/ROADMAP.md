@@ -73,16 +73,13 @@ binary gets an instruction, not a `FileNotFoundError`.
 
 ## Backlog — recorded, not scheduled
 
-- [ ] **B0** — **NFR-1 is not met.** Measured: `import voicevision` costs
-      ~1 ms of own code but ~420 ms cumulative, essentially all of it
-      `pydantic_settings` (205 ms) and `pydantic._migration` (185 ms) pulled in
-      at import scope by `voicevision.core.config`. The 50 ms target is
-      unreachable while config is a hard import dependency.
-      Candidate fix: PEP 562 module `__getattr__` so `VoiceVisionConfig`
-      loads lazily, keeping `voicevision.core.protocols` import cheap for
-      callers who only want the interfaces. Needs a decision because it changes
-      the public import surface.
-      *Discovered during T007 validation.*
+- [x] **B0** — NFR-1 import cost. **Resolved.** `VoiceVisionConfig` now loads
+      lazily via PEP 562 `__getattr__`, in both `voicevision` and
+      `voicevision.core`. Measured: bare `import voicevision` went from ~420 ms
+      to ~4 ms; first access to `VoiceVisionConfig` costs ~180 ms and is paid
+      only by callers that actually construct one. `tests/test_import_cost.py`
+      asserts `pydantic` is absent from `sys.modules` after a bare import, so
+      the optimisation cannot be silently reverted.
 - [ ] **B1** — Streaming LLM output into TTS sentence-by-sentence (needs
       sentence-boundary detection; naive token streaming sounds broken)
 - [ ] **B2** — Conversation memory across turns (currently the caller owns it)
@@ -91,11 +88,15 @@ binary gets an instruction, not a `FileNotFoundError`.
       out of v0.1 scope
 - [ ] **B5** — Model download helper CLI (operator currently installs by hand)
 - [ ] **B6** — ONNX Runtime vision path, to share onnxruntime with piper
-- [ ] **B7** — **Docker packaging.** Operator confirmed deployment is
-      containerised. Consequences not yet designed: audio needs
-      `--device /dev/snd`; models should be a mounted volume, not baked into
-      the image; `llama-server`'s port must be exposed; `close()` ordering
-      matters more when a container is the unit of restart.
+- [x] **B7** — Container deployment. **Done.** ADR-003 records the four
+      consequences (audio pass-through, models as a volume, PID 1 signal
+      handling, loopback-bound `llama-server`). Delivered:
+      `docker/Dockerfile` (multi-stage, buildx amd64+arm64),
+      `docker/voicevision-compose.yml`, `docker/entrypoint.sh` (SIGTERM
+      forwarding), and `voicevision.preflight` as a console script.
+      Preflight already caught a real bug: `sounddevice` raises `OSError`, not
+      `ImportError`, when PortAudio is missing, so the diagnostic was itself
+      crashing on the exact failure it exists to report.
 
 ---
 

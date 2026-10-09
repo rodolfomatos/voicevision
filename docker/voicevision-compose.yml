@@ -1,0 +1,51 @@
+# voicevision — containerised deployment.
+#
+# Models are a host directory mounted at /models, never baked into the image
+# (ADR-003 §2). Audio needs the host device node passed through (ADR-003 §1).
+# `init: true` puts tini at PID 1 for signal forwarding and zombie reaping
+# (ADR-003 §3).
+
+services:
+  voicevision:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      # Cross-build for a Pi from an x86 laptop:
+      #   docker buildx build --platform linux/arm64 \
+      #     -f docker/Dockerfile -t voicevision:arm64 .
+      platforms:
+        - linux/amd64
+        - linux/arm64
+
+    # tini as PID 1. Without it, Python ignores SIGTERM and every graceful
+    # shutdown becomes a 10s hang plus SIGKILL.
+    init: true
+
+    # Host sound hardware, passed through explicitly.
+    devices:
+      - /dev/snd:/dev/snd
+
+    volumes:
+      # Models stay on the host. Swapping a model is a file copy, not a rebuild.
+      - ../models:/models:ro
+
+    environment:
+      VOICEVISION_LLM_MODEL: /models/qwen3-1.7b-q4_k_m.gguf
+      VOICEVISION_STT_MODEL: /models/whisper-base.bin
+      VOICEVISION_TTS_MODEL: /models/piper-en-medium.onnx
+
+      # llama-server is managed in-process and reached over loopback, so it is
+      # not published. Set to 0.0.0.0 to expose it for debugging — that turns an
+      # unauthenticated HTTP server into a network service (ADR-003 §4).
+      VOICEVISION_LLM_HOST: "127.0.0.1"
+      VOICEVISION_LLM_PORT: "8080"
+
+      VOICEVISION_STT_LANGUAGE: "en"
+      VOICEVISION_AUDIO_BACKEND: sounddevice
+
+    # ports:
+    #   - "8080:8080"   # only meaningful with VOICEVISION_LLM_HOST=0.0.0.0
+
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ["python3", "-m", "voicevision.cli", "run"]

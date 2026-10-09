@@ -30,16 +30,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Runtime extras. Optional on purpose: the core must import with none of these
+# (see tests/test_import_cost.py and B0 in docs/ROADMAP.md).
+vad = ["webrtcvad-wheels>=2.0"]
+audio = ["sounddevice>=0.4.6"]
+
+all = ["webrtcvad-wheels>=2.0", "sounddevice>=0.4.6"]
+
 # LLM backends
 ollama = ["httpx>=0.27"]
-llamacpp = ["llama-cpp-python>=0.2.90"]
+llamacpp = ["httpx>=0.27"]
 
 # STT backends
-whisper-cpp = ["whisper-cpp-python>=0.1.5"]
+whisper-cpp = []
 faster-whisper = ["faster-whisper>=1.1"]
 
 # TTS backends
-piper = ["piper-tts>=1.2"]
+piper = []
 
 # Vision backends
 # Moondream via GGUF + llama.cpp — NOT torch/transformers.
@@ -64,6 +71,9 @@ dev = [
     "pre-commit>=3.7",
 ]
 
+[project.scripts]
+voicevision-preflight = "voicevision.preflight:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["voicevision*"]
@@ -85,6 +95,9 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "C9", "SIM", "T20", "PTH", "ERA", "RET", "ARG"]
 ignore = ["S101", "ARG001", "ARG002"]
+# preflight is a CLI: printing findings to stdout is its entire job.
+# T201 no-print, ARG005 lambda used only for its side effect.
+per-file-ignores = { "src/voicevision/preflight.py" = ["T201"] }
 
 [tool.ruff.format]
 quote-style = "double"
