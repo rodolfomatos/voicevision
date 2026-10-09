@@ -1,17 +1,130 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aes-project"
+name = "voicevision"
 version = "0.1.0"
-description = "AES-managed Python project"
+description = "Modular multimodal AI brick: LLM + STT + TTS + Vision + Camera, cross-platform"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Rodolfo Ambrósio", email = "rodolfo@ambros.io"}
+]
+keywords = ["ai", "llm", "stt", "tts", "vision", "voice", "robotics", "edge", "offline"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "typing-extensions>=4.10",
+]
+
+[project.optional-dependencies]
+# LLM backends
+ollama = ["httpx>=0.27"]
+llamacpp = ["llama-cpp-python>=0.2.90"]
+
+# STT backends
+whisper-cpp = ["whisper-cpp-python>=0.1.5"]
+faster-whisper = ["faster-whisper>=1.1"]
+
+# TTS backends
+piper = ["piper-tts>=1.2"]
+
+# Vision backends
+# Moondream via GGUF + llama.cpp — NOT torch/transformers.
+# Rationale: see docs/ADR-001-backends-llamacpp.md
+# torch has no Android/Termux wheel; Termux pip accepts only android_* tags,
+# so every binary dep builds from source on-device.
+moondream = ["llama-cpp-python>=0.3.30", "pillow>=10.0"]
+
+# Camera backends
+opencv = ["opencv-python>=4.9"]
+android = ["chaquopy>=12.0"]  # only works in Android build context
+
+# Dev/test
+dev = [
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "bandit>=1.7",
+    "memory-profiler>=0.61",
+    "pre-commit>=3.7",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["voicevision*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src --cov-report=xml --cov-report=term"
+addopts = "--cov=src/voicevision --cov-report=xml --cov-report=term-missing --cov-fail-under=80"
 pythonpath = ["src"]
+markers = [
+    "integration: requires external models/services",
+    "android: requires Android environment",
+    "slow: takes > 5s",
+]
 
 [tool.ruff]
-line-length = 88
-select = ["E", "F", "W", "I"]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "C9", "SIM", "T20", "PTH", "ERA", "RET", "ARG"]
+ignore = ["S101", "ARG001", "ARG002"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+plugins = ["pydantic.mypy"]
+exclude = ["tests/fixtures", ".venv", "build", "dist"]
+
+[[tool.mypy.overrides]]
+module = "voicevision.platform.android"
+ignore_missing_imports = true  # chaquopy not available in standard env
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "build", "dist"]
+skips = ["B101", "B601"]  # assert, shell (used in controlled CLI wrappers)
+
+[tool.coverage.run]
+source = ["src/voicevision"]
+omit = ["*/tests/*", "*/conftest.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "dirty-tag"

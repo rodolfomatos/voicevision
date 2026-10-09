@@ -1,18 +1,20 @@
-node_modules/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 coverage.xml
-coverage.out
-target/
-dist/
-build/
-.venv/
-env/
-.idea/
-.vscode/
-*.log
-.DS_Store
-.tmp/
-aes/verification/
-.llm_venv/
+htmlcov/
+
+# AES
+aes/shadow/access.log
+aes/metrics/
