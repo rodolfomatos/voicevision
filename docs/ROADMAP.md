@@ -73,6 +73,16 @@ binary gets an instruction, not a `FileNotFoundError`.
 
 ## Backlog — recorded, not scheduled
 
+- [ ] **B0** — **NFR-1 is not met.** Measured: `import voicevision` costs
+      ~1 ms of own code but ~420 ms cumulative, essentially all of it
+      `pydantic_settings` (205 ms) and `pydantic._migration` (185 ms) pulled in
+      at import scope by `voicevision.core.config`. The 50 ms target is
+      unreachable while config is a hard import dependency.
+      Candidate fix: PEP 562 module `__getattr__` so `VoiceVisionConfig`
+      loads lazily, keeping `voicevision.core.protocols` import cheap for
+      callers who only want the interfaces. Needs a decision because it changes
+      the public import surface.
+      *Discovered during T007 validation.*
 - [ ] **B1** — Streaming LLM output into TTS sentence-by-sentence (needs
       sentence-boundary detection; naive token streaming sounds broken)
 - [ ] **B2** — Conversation memory across turns (currently the caller owns it)
@@ -81,6 +91,11 @@ binary gets an instruction, not a `FileNotFoundError`.
       out of v0.1 scope
 - [ ] **B5** — Model download helper CLI (operator currently installs by hand)
 - [ ] **B6** — ONNX Runtime vision path, to share onnxruntime with piper
+- [ ] **B7** — **Docker packaging.** Operator confirmed deployment is
+      containerised. Consequences not yet designed: audio needs
+      `--device /dev/snd`; models should be a mounted volume, not baked into
+      the image; `llama-server`'s port must be exposed; `close()` ordering
+      matters more when a container is the unit of restart.
 
 ---
 

@@ -3,7 +3,7 @@ ticket: T007
 title: SubprocessBackend base class
 sprint: sprint-02
 priority: high
-status: todo
+status: done
 created: 2026-10-09
 ---
 

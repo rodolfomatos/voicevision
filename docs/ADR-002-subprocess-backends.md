@@ -47,13 +47,20 @@ the `piper` binary; the Python wrapper has been superseded upstream.
 - Backends are testable by substituting a fake subprocess
 
 **Negative**
-- Pipe/HTTP encoding is a real failure surface. Non-UTF-8 model output must be
+- Pipe encoding is a real failure surface. Non-UTF-8 model output must be
   handled explicitly.
-- Stream reaping, zombie processes and partial reads must be handled correctly
-  — naive `communicate()` handling will deadlock on chatty stderr.
+- **CLI backends cannot be kept warm (FR-7).** `whisper.cpp` and `piper` are
+  one-shot programs; `communicate()` closes stdin, so a child exits when the
+  call returns. Every STT and TTS call pays a process spawn (~50-100 ms). This
+  was originally specified as a hard requirement ("backends must be warm") and
+  turned out to be unimplementable — the fake-child harness in T008 exposed it.
+  The requirement was rewritten, not the code. The LLM, where spawn cost and
+  model load actually matter, is a resident HTTP daemon instead.
 - Each backend needs availability probing (FR-8) to give a useful error before
   the user hits it.
-- Slightly higher per-call latency vs in-process. Mitigated by FR-7 warm reuse.
+- `stderr` must be drained concurrently with `stdout` or the child deadlocks
+  once it fills the 64 KiB pipe buffer. `communicate()` does this; a manual pipe
+  loop does not. Covered by a regression test.
 
 ## Revisit if
 

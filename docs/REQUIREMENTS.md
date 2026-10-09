@@ -25,23 +25,29 @@ Scope: **v0.1 = voice loop only.** Vision and camera are v0.2+, behind unchanged
 - **FR-6** Every model backend runs as a **separate OS process**, communicating
   over stdin/stdout pipes. The library never links a model runtime into its
   own address space.
-- **FR-7** Backends are **long-lived and warm**. A backend spawns its process on
-  first use and reuses it for subsequent calls. Spawning per call is forbidden.
+- **FR-7** **CLI backends are one-shot: one child process per call.**
+  `whisper.cpp` and `piper` read input, write output, and exit; they have no
+  loop mode. `communicate()` closes stdin, so a child cannot be kept alive
+  between calls even in principle. The library does not pretend otherwise.
+  Warm reuse applies only to the LLM daemon (FR-12), which is HTTP.
 - **FR-8** Each backend exposes `available() -> bool` reporting whether its
   executable exists and is runnable, and `install_hint` naming the package
   that provides it.
-- **FR-9** A backend that dies mid-call is restarted once, then the error is
-  surfaced. No infinite respawn.
-- **FR-10** Process stderr is captured and attached to any raised error. Silent
-  model failures are a bug.
+- **FR-9** A child that dies mid-call is retried exactly once with a fresh
+  process, then the error is surfaced. A timeout is **not** retried — it is a
+  verdict about the workload, not a crash. No infinite respawn.
+- **FR-10** Process stderr is captured concurrently with stdout and attached to
+  any raised error, together with the command and exit code. Silent model
+  failures are a bug.
 
 ### Concrete backends for v0.1
 
 - **FR-11** `WhisperCppBackend` — drives the `whisper.cpp` CLI.
   stdin: 16 kHz mono PCM16 · stdout: transcript text.
-- **FR-12** `LlamaCppBackend` — drives `llama-server` over localhost HTTP.
-  Chosen over `llama-cli` per call because the server keeps the model resident
-  and exposes a streaming endpoint.
+- **FR-12** `LlamaCppBackend` — supervises a `llama-server` subprocess that it
+  starts and keeps resident. Chosen over `llama-cli` because the server holds
+  the model loaded between calls and exposes a documented HTTP API.
+  This is the **only** warm backend in v0.1 (see FR-7).
 - **FR-13** `PiperBackend` — drives the `piper` CLI.
   stdin: text · stdout: WAV bytes.
 - **FR-14** `WebrtcVadBackend` — WebRTC VAD via `webrtcvad-wheels`.
@@ -81,8 +87,9 @@ Scope: **v0.1 = voice loop only.** Vision and camera are v0.2+, behind unchanged
 | ID | Category | Requirement | How verified |
 |----|----------|-------------|---------------|
 | NFR-1 | Performance | Core import < 50 ms | `python -X importtime -c "import voicevision"` |
-| NFR-2 | Performance | Warm LLM first-token < 500 ms on target hardware | benchmark script, marked `@pytest.mark.slow` |
-| NFR-3 | Performance | No model process spawns on a steady-state call | process-count assertion in tests |
+| NFR-2 | Performance | Warm LLM first-token < 500 ms on target hardware | benchmark script, `@pytest.mark.slow` |
+| NFR-3 | Performance | Exactly one child per STT/TTS call; one resident daemon for the LLM | spawn-count assertions in tests |
+| NFR-3b | Performance | No reaped or hung child accumulates across calls | `subprocess._active` count stable |
 | NFR-4 | Memory | Core RSS < 50 MB; models are subprocesses and counted separately | `memory_profiler` |
 | NFR-5 | Testability | Every backend has a `Dummy*` sibling; the whole loop is testable with no models, no audio hardware | `pytest -m "not integration"` |
 | NFR-6 | Testability | CI requires no model download and no audio device | CI runs `make check` only |

@@ -71,7 +71,7 @@ include = ["voicevision*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=src/voicevision --cov-report=xml --cov-report=term-missing --cov-fail-under=80"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = [
     "integration: requires external models/services",
     "android: requires Android environment",

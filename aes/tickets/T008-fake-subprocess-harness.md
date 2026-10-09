@@ -3,7 +3,7 @@ ticket: T008
 title: Fake-subprocess test harness
 sprint: sprint-02
 priority: high
-status: todo
+status: done
 created: 2026-10-09
 ---
 
