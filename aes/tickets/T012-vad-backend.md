@@ -3,7 +3,7 @@ ticket: T012
 title: WebrtcVadBackend
 sprint: sprint-03
 priority: high
-status: todo
+status: done
 created: 2026-10-09
 ---
 
