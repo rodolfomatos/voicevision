@@ -132,3 +132,7 @@ class WebrtcVadBackend:
             f"WebrtcVadBackend(aggressiveness={self._aggressiveness}, "
             f"sample_rate={self._sample_rate}, silence_ms={self._silence_ms})"
         )
+
+    def close(self) -> None:
+        """No resources to release — included for uniform backend interface."""
+        pass

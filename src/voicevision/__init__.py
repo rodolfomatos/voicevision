@@ -4,9 +4,10 @@ Unified interface for LLM, STT, TTS, Vision, and Camera backends.
 Target: Ubuntu 22.04+ and Raspberry Pi OS.
 
 Quickstart:
-    from voicevision import VoiceVision
-    with VoiceVision() as vv:
-        print(vv.llm.generate("Hello!"))
+    from voicevision import VoicePipeline, PipelineConfig
+    config = PipelineConfig(...)
+    with VoicePipeline(config) as vp:
+        audio_out = vp.process(audio_in)
 
 Import cost is kept low on purpose: only `typing` is touched at import time.
 The Protocol interfaces and the registry are eager because they are free;
@@ -34,6 +35,7 @@ from voicevision.errors import (
     ConfigurationError,
     VoiceVisionError,
 )
+from voicevision.pipeline import PipelineConfig, VoicePipeline
 
 if TYPE_CHECKING:
     from voicevision.core.config import VoiceVisionConfig
@@ -45,6 +47,8 @@ _LAZY: dict[str, str] = {
 __version__ = "0.1.0"
 
 __all__ = [
+    "PipelineConfig",
+    "VoicePipeline",
     "VoiceVisionConfig",
     "BackendRegistry",
     "LLMBackend",
