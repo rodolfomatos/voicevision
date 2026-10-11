@@ -220,7 +220,9 @@ class SubprocessBackend:
         """SIGTERM, then SIGKILL after a grace period."""
         if proc.poll() is None:
             proc.terminate()
-            try:
+            # contextlib.suppress cannot express this: the timeout is not an
+            # error to ignore, it is the signal to escalate to SIGKILL.
+            try:  # noqa: SIM105
                 proc.wait(timeout=_KILL_GRACE_SECONDS)
             except subprocess.TimeoutExpired:
                 proc.kill()

@@ -3,7 +3,7 @@ ticket: T010
 title: LlamaCppBackend
 sprint: sprint-03
 priority: high
-status: todo
+status: done
 created: 2026-10-09
 ---
 
