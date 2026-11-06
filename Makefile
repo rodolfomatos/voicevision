@@ -8,7 +8,7 @@
         format-ruff \
         docs-check code-check test-check lint-check \
         verify-implementation \
-        install-precommit \
+        install-precommit install-voice-input \
         aes-plan aes-build aes-verify aes-review aes-learn \
         aes-wake aes-sleep
 
@@ -34,6 +34,10 @@ setup:
 install-precommit:
 	@pre-commit install
 	@pre-commit install --hook-type commit-msg
+
+install-voice-input:
+	@echo "Installing voice-input system dependencies (requires sudo)..."
+	@sudo sh "$(CURDIR)/install-voice-input.sh"
 
 # --- Run ---
 run:
