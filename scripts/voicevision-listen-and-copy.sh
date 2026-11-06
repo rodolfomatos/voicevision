@@ -12,23 +12,32 @@
 #   - xclip
 #   - VOICEVISION_STT_MODEL definido
 #
-# Nota: este script é autocontido para funcionar tanto a partir de um terminal
-# como de um atalho global do ambiente de desktop (que não carrega ~/.bashrc).
+# Nota: atalhos globais do ambiente de desktop NÃO carregam ~/.bashrc, nem têm
+# o PATH completo. Este script é autocontido para funcionar em qualquer contexto.
 set -eu
 
-# --- Garantir que ~/.local/bin está no PATH (para encontrar voicevision-listen) ---
-case ":$PATH:" in
-    *:"$HOME/.local/bin":*) ;;
-    *) export PATH="$HOME/.local/bin:$PATH" ;;
-esac
+# --- Garantir HOME está definido ---
+export HOME="${HOME:-/home/rodolfo}"
 
-# --- Carregar variáveis de ambiente do ~/.bashrc (não é feito por atalhos globais) ---
+# --- Garantir PATH completo (atalhos globais têm PATH limitado) ---
+for p in "$HOME/.local/bin" /usr/local/bin /usr/bin /bin; do
+    case ":$PATH:" in
+        *:"$p":*) ;;
+        *) export PATH="$p:$PATH" ;;
+    esac
+done
+
+# --- Carregar variáveis de ambiente do ~/.bashrc (atalhos globais não o fazem) ---
 if [ -f "$HOME/.bashrc" ]; then
     # shellcheck disable=SC1090
     . "$HOME/.bashrc" 2>/dev/null || true
 fi
 
-# --- Garantir que DISPLAY está definido para notify-send (X11) ---
+# --- Fallback: se a variável não ficou definida, usar valor padrão ---
+export VOICEVISION_STT_MODEL="${VOICEVISION_STT_MODEL:-/models/whisper-base.bin}"
+export VOICEVISION_STT_LANGUAGE="${VOICEVISION_STT_LANGUAGE:-pt}"
+
+# --- Garantir DISPLAY para notify-send (X11) ---
 export DISPLAY="${DISPLAY:-:0}"
 
 TEXT=$(voicevision-listen --seconds 5 2>/dev/null || true)
