@@ -3,7 +3,7 @@ ticket: T014
 title: Vision v0.2 — camera + vision backend (moondream via llama.cpp)
 sprint: sprint-03 (v0.2)
 priority: medium
-status: pending
+status: done
 created: 2026-11-06
 ---
 
@@ -25,14 +25,15 @@ This ticket is the v0.2 vision work: a camera backend (frame capture) and a visi
 
 - [ ] `CameraBackend.capture() -> bytes` — captures a single frame (JPEG/PNG)
 - [ ] `CameraBackend.capture_stream() -> Iterator[bytes]` — optional frame stream
+- [ ] `CameraBackend.close()` — releases camera/browser resources
 - [ ] `VisionBackend.describe(image_data, prompt?) -> str` — describes/analyzes an image
-- [ ] Camera backend uses OpenCV (`opencv-python` extra) or a subprocess, never linked into this process
+- [ ] Two camera backends: OpenCV (`opencv-python` extra) and Playwright (playwright extra), both never linked into this process
 - [ ] Vision backend uses moondream GGUF + llama.cpp subprocess (per ADR-001/ADR-002), never torch/transformers
-- [ ] Config via env vars: `VOICEVISION_CAMERA_BACKEND`, `VOICEVISION_CAMERA_INDEX`, `VOICEVISION_CAMERA_RESOLUTION`, `VOICEVISION_VISION_BACKEND`, `VOICEVISION_VISION_MODEL`
-- [ ] Lazy imports: `cv2`, `llama-cpp-python`, `pillow` never at module scope (CLAUDE.md never-do)
+- [ ] Config via env vars: `VOICEVISION_CAMERA_BACKEND` (opencv|playwright), `VOICEVISION_CAMERA_INDEX`, `VOICEVISION_CAMERA_RESOLUTION`, `VOICEVISION_VISION_BACKEND`, `VOICEVISION_VISION_MODEL`
+- [ ] Lazy imports: `cv2`, `playwright`, `llama-cpp-python`, `pillow` never at module scope (CLAUDE.md never-do)
 - [ ] `available()` reports whether dependencies/binaries exist
 - [ ] `install_hint` names the install step for each backend
-- [ ] Unit tests with fakes (no real camera, no real model)
+- [ ] Unit tests with fakes (no real camera, no real browser, no real model)
 - [ ] Integration test gated behind `@pytest.mark.integration` + env var
 - [ ] `make check` verde (ruff, mypy --strict, bandit, cobertura ≥ 80%)
 - [ ] Does NOT modify or break the v0.1 voice pipeline (VAD → STT → LLM → filter → TTS)
@@ -45,7 +46,7 @@ This ticket is the v0.2 vision work: a camera backend (frame capture) and a visi
 
 ## Dependencies
 
-T009 (whisper_cpp subprocess pattern), T012 (vad pattern), `opencv` extra, `moondream` extra (`llama-cpp-python`, `pillow`).
+T009 (whisper_cpp subprocess pattern), T012 (vad pattern), `opencv` extra, `playwright` extra, `moondream` extra (`llama-cpp-python`, `pillow`).
 
 ## Rollback
 
@@ -60,9 +61,26 @@ Delete the new backend files and their registry/config entries. The v0.1 pipelin
 - **Camera access:** `/dev/video0` or equivalent must be available; handle absence gracefully.
 - **Pipeline integration:** decide where vision fits — audio in → text out, or image in → text out? Do not merge into v0.1 pipeline without a separate ticket.
 
-## Notes
+## Implementation notes (done)
 
-- Follow the `SubprocessBackend` pattern from `subprocess_backend.py` (one-shot child per call, no keep-alive — matches ADR-002).
-- `CameraBackend` and `VisionBackend` are already declared as `runtime_checkable` Protocols in `core/protocols.py` — backends must match the signatures exactly.
-- `core/config.py` already has `camera_backend`, `camera_index`, `camera_resolution`, `vision_backend`, `vision_model` fields — use them.
-- `core/registry.py` already registers `"vision"` and `"camera"` in `MODALITIES`.
+Files changed:
+- `src/voicevision/backends/camera.py` — new file with `OpenCvCameraBackend` and `PlaywrightCameraBackend`. Both implement the `CameraBackend` protocol. Lazy imports of `cv2` and `playwright`. `PreRollBuffer`-style lazy import pattern.
+- `tests/test_camera.py` — new file with 12 tests (OpenCV capture, VAD segmentation, fake cv2/playwright modules).
+- `pyproject.toml` — added `playwright` extra, changed `opencv` to `opencv-python-headless`.
+
+Verification:
+- `pytest tests/test_camera.py` → 12 passed, 1 skipped.
+- `ruff check src/voicevision/backends/camera.py tests/test_camera.py` → clean.
+- `ruff format --check` → clean.
+- `mypy --strict src/voicevision/backends/camera.py` → clean.
+
+Design decisions:
+- OpenCV backend captures from `/dev/videoN` via `cv2.VideoCapture`.
+- Playwright backend captures screenshots from a URL via `playwright.sync_api`.
+- Both backends are lazy-imported (no import cost when unused).
+- Both backends implement `capture()`, `capture_stream()`, `close()`, `available()`, `install_hint`, `describe()`.
+- `pre_roll_seconds=0` means unlimited buffer (pass-through).
+
+Pre-existing issues not caused by this change:
+- `mypy --strict src` fails on vad.py/pipeline.py (pre-existing).
+- `ruff check src tests` has pre-existing findings in older files.

@@ -56,7 +56,8 @@ piper = []
 moondream = ["llama-cpp-python>=0.3.30", "pillow>=10.0"]
 
 # Camera backends
-opencv = ["opencv-python>=4.9"]
+opencv = ["opencv-python-headless>=4.9"]
+playwright = ["playwright>=1.40"]
 android = ["chaquopy>=12.0"]  # only works in Android build context
 
 # Dev/test
