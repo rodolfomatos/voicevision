@@ -9,6 +9,40 @@ multimodal AI on the edge. It is a library, not an application: the caller owns
 context, models, and audio devices. Everything runs locally, with no cloud API,
 no HTTP/gRPC surface of our own, and no model runtime linked into this process.
 
+## How we use it — Linux Mint + OpenCode
+
+This is the setup that motivated `voicevision`: speaking into OpenCode instead
+of typing, on a Linux Mint (Cinnamon) desktop.
+
+1. **Install everything** (one command, needs `sudo`):
+
+   ```bash
+   make install-voice-input
+   source ~/.bashrc
+   ```
+
+2. **Configure the global hotkey** in Cinnamon:
+   *Menu → Preferences → Keyboard → Shortcuts → Custom Shortcuts → +*
+
+   | Field | Value |
+   |-------|-------|
+   | Name | `Voice → Text (OpenCode)` |
+   | Command | `/home/rodolfo/.local/bin/voicevision-listen-and-copy` |
+   | Shortcut | `F9` (or any key that does not conflict) |
+
+3. **Daily flow:**
+   * Focus the OpenCode chat input.
+   * Press `F9`, speak clearly for a few seconds.
+   * A desktop notification shows the transcript; the text is in your clipboard.
+   * Press `ctrl+v` in the OpenCode input to paste, review, then `Enter` to send.
+
+The wrapper records until ~2 seconds of silence (VAD), transcribes via
+whisper.cpp, and copies the result to the clipboard — no LLM, no TTS, no
+network. Audio stays on the local machine.
+
+See [docs/VOICE_INPUT.md](docs/VOICE_INPUT.md) for the full reference:
+wrapper script, environment variables, troubleshooting, and limitations.
+
 ## What it does
 
 The v0.1 voice loop runs end to end in a single call:
