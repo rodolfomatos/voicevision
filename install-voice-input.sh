@@ -63,20 +63,35 @@ echo "  ✓ dependências de sistema instaladas"
 echo ""
 
 # --- 2. Construir whisper.cpp e instalar whisper-cli ---
-echo "[2/6] Construindo whisper.cpp (whisper-cli)..."
+echo "[2/6] Construindo whisper.cpp (whisper-cli + libwhisper)..."
 WHISPER_DIR="/tmp/whispercpp-build-$$"
 rm -rf "$WHISPER_DIR"
 git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git "$WHISPER_DIR"
 cd "$WHISPER_DIR"
-cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON >/dev/null 2>&1
 cmake --build build --target whisper-cli -j"$(nproc)" >/dev/null 2>&1
 install -m 0755 -o root -g root build/bin/whisper-cli /usr/local/bin/whisper-cli
+# Instalar a biblioteca partilhada libwhisper.so.1 para o linker do sistema
+if [ -d build/lib ]; then
+    install -m 0755 -o root -g root build/lib/libwhisper.so.1 /usr/local/lib/libwhisper.so.1
+    ln -sf libwhisper.so.1 /usr/local/lib/libwhisper.so
+    ldconfig
+elif [ -f build/bin/libwhisper.so.1 ]; then
+    install -m 0755 -o root -g root build/bin/libwhisper.so.1 /usr/local/lib/libwhisper.so.1
+    ln -sf libwhisper.so.1 /usr/local/lib/libwhisper.so
+    ldconfig
+fi
 cd /
 rm -rf "$WHISPER_DIR"
 
 if ! command -v whisper-cli >/dev/null 2>&1; then
     echo "Erro: whisper-cli não foi instalado em /usr/local/bin." >&2
     exit 1
+fi
+# Verificar que whisper-cli consegue carregar a biblioteca partilhada
+if ! whisper-cli -h >/dev/null 2>&1; then
+    echo "Aviso: whisper-cli instalado mas não consegue carregar libwhisper.so.1."
+    echo "  Pode ser necessário adicionar /usr/local/lib ao ldconfig."
 fi
 echo "  ✓ whisper-cli instalado: $(command -v whisper-cli)"
 echo ""
