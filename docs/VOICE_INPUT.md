@@ -142,7 +142,32 @@ whisper.cpp requires a model file (GGML format `.bin`). The installer downloads
 other languages.
 
 Alternative models can be used by setting `VOICEVISION_STT_MODEL` to a
-different `.bin` path.
+different `.bin` path, or via the `--model` CLI flag.
+
+#### STT model sizes
+
+whisper.cpp ships several model sizes with different speed/accuracy trade-offs.
+Choose based on your hardware:
+
+| Model | File | Size | Speed | Accuracy | Best for |
+|-------|------|------|-------|----------|----------|
+| tiny | `ggml-tiny.bin` | ~39 MB | Fastest | Lower | Raspberry Pi Zero, very low latency |
+| base | `ggml-base.bin` | ~142 MB | Fast | Good | Default, general purpose (recommended) |
+| small | `ggml-small.bin` | ~244 MB | Slower | Better | Desktop, better accuracy |
+| medium | `ggml-medium.bin` | ~769 MB | Slow | Better still | High accuracy, more CPU/RAM |
+| large | `ggml-large.bin` | ~1.5 GB | Slowest | Best | Server-grade hardware |
+
+Example:
+
+```bash
+export VOICEVISION_STT_MODEL="/models/ggml-small.bin"
+voicevision-listen --seconds 5
+```
+
+Suggested sources:
+
+- **whisper.cpp models:** https://github.com/ggerganov/whisper.cpp
+  (`ggml-tiny.bin`, `ggml-base.bin`, `ggml-small.bin`, etc.)
 
 ---
 

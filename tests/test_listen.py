@@ -458,7 +458,50 @@ class TestPreRollBytes:
         assert _pre_roll_bytes(0.0) == 0
 
 
-class TestWakeWordMode:
+class TestSttModelSelection:
+    def test_config_defaults_to_empty_model(self, clean_env: Any) -> None:
+        cfg = load_config()
+        assert cfg.stt_model == ""
+
+    def test_config_reads_stt_model_from_env(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        monkeypatch.setenv("VOICEVISION_STT_MODEL", "/models/ggml-small.bin")
+        cfg = load_config()
+        assert cfg.stt_model == "/models/ggml-small.bin"
+
+    def test_cli_model_flag_overrides_env(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        monkeypatch.setenv("VOICEVISION_STT_MODEL", "/models/ggml-base.bin")
+        captured_models = []
+
+        def capture_transcribe(pcm: bytes, config: ListenConfig) -> str:
+            captured_models.append(config.stt_model)
+            return "ola mundo"
+
+        with (
+            patch(
+                "voicevision.listen._capture_fixed_seconds",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                side_effect=capture_transcribe,
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/ggml-small.bin",
+                    fixed_seconds=0.12,
+                )
+            )
+        assert code == 0
+        assert captured_models == ["/models/ggml-small.bin"]
+
     def test_wake_word_detected_prints_remainder(
         self,
         monkeypatch: Any,
