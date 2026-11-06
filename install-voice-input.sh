@@ -63,7 +63,7 @@ echo "  ✓ dependências de sistema instaladas"
 echo ""
 
 # --- 2. Construir whisper.cpp e instalar whisper-cli ---
-echo "[2/6] Construindo whisper.cpp (whisper-cli + libwhisper)..."
+echo "[2/6] Construindo whisper.cpp (whisper-cli + bibliotecas partilhadas)..."
 WHISPER_DIR="/tmp/whispercpp-build-$$"
 rm -rf "$WHISPER_DIR"
 git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git "$WHISPER_DIR"
@@ -71,16 +71,26 @@ cd "$WHISPER_DIR"
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON >/dev/null 2>&1
 cmake --build build --target whisper-cli -j"$(nproc)" >/dev/null 2>&1
 install -m 0755 -o root -g root build/bin/whisper-cli /usr/local/bin/whisper-cli
-# Instalar a biblioteca partilhada libwhisper.so.1 para o linker do sistema
+# Instalar TODAS as bibliotecas partilhadas (libwhisper.so.1, libggml.so.0, etc.)
+# para que o linker do sistema as encontre ao correr whisper-cli.
 if [ -d build/lib ]; then
-    install -m 0755 -o root -g root build/lib/libwhisper.so.1 /usr/local/lib/libwhisper.so.1
-    ln -sf libwhisper.so.1 /usr/local/lib/libwhisper.so
-    ldconfig
-elif [ -f build/bin/libwhisper.so.1 ]; then
-    install -m 0755 -o root -g root build/bin/libwhisper.so.1 /usr/local/lib/libwhisper.so.1
-    ln -sf libwhisper.so.1 /usr/local/lib/libwhisper.so
-    ldconfig
+    for lib in build/lib/*.so*; do
+        install -m 0755 -o root -g root "$lib" /usr/local/lib/
+    done
+elif [ -d build/bin ]; then
+    for lib in build/bin/*.so*; do
+        install -m 0755 -o root -g root "$lib" /usr/local/lib/
+    done
 fi
+# Criar symlinks para versões sem número (ex: libwhisper.so -> libwhisper.so.1)
+for lib in /usr/local/lib/*.so.*; do
+    base=$(basename "$lib")
+    soname="${base%.*}"          # ex: libwhisper.so
+    if [ ! -e "/usr/local/lib/$soname" ]; then
+        ln -sf "$base" "/usr/local/lib/$soname"
+    fi
+done
+ldconfig
 cd /
 rm -rf "$WHISPER_DIR"
 
@@ -88,9 +98,9 @@ if ! command -v whisper-cli >/dev/null 2>&1; then
     echo "Erro: whisper-cli não foi instalado em /usr/local/bin." >&2
     exit 1
 fi
-# Verificar que whisper-cli consegue carregar a biblioteca partilhada
+# Verificar que whisper-cli consegue carregar as bibliotecas partilhadas
 if ! whisper-cli -h >/dev/null 2>&1; then
-    echo "Aviso: whisper-cli instalado mas não consegue carregar libwhisper.so.1."
+    echo "Aviso: whisper-cli instalado mas não consegue carregar as bibliotecas partilhadas."
     echo "  Pode ser necessário adicionar /usr/local/lib ao ldconfig."
 fi
 echo "  ✓ whisper-cli instalado: $(command -v whisper-cli)"
