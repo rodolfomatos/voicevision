@@ -30,7 +30,10 @@ from voicevision.listen import (
     _capture_until_utterance,
     _env_float,
     _env_int,
+    _normalize_text,
+    _strip_wake_word,
     _transcribe_pcm,
+    _wake_word_detected,
     load_config,
     run,
 )
@@ -327,6 +330,138 @@ class TestRun:
         assert code == 0
         mock_fixed.assert_called_once()
         mock_vad.assert_not_called()
+        out = capsys.readouterr().out.strip()
+        assert out == "ola mundo"
+
+
+# -- wake word ---------------------------------------------------------------
+
+
+class TestNormalizeText:
+    def test_lowercase(self) -> None:
+        assert _normalize_text("OLÁ AMBRÓSIO") == "ola ambrosio"
+
+    def test_strips_accents(self) -> None:
+        assert _normalize_text("áéíóú") == "aeiou"
+
+    def test_collapses_whitespace(self) -> None:
+        assert _normalize_text("  olá   ambrósio  ") == "ola ambrosio"
+
+    def test_removes_punctuation(self) -> None:
+        assert _normalize_text("olá, ambrósio!") == "ola ambrosio"
+
+    def test_keeps_digits(self) -> None:
+        assert _normalize_text("ambrosio 2") == "ambrosio 2"
+
+    def test_empty(self) -> None:
+        assert _normalize_text("") == ""
+
+
+class TestWakeWordDetection:
+    def test_match_exact(self) -> None:
+        assert _wake_word_detected("olá ambrósio", "olá ambrósio") is True
+
+    def test_match_case_insensitive(self) -> None:
+        assert _wake_word_detected("OLÁ AMBRÓSIO", "olá ambrósio") is True
+
+    def test_match_with_accents(self) -> None:
+        assert _wake_word_detected("ola ambrosio", "olá ambrósio") is True
+
+    def test_match_substring(self) -> None:
+        assert _wake_word_detected("olá ambrósio, como vais?", "olá ambrósio") is True
+
+    def test_no_match(self) -> None:
+        assert _wake_word_detected("ola mundo", "olá ambrósio") is False
+
+    def test_empty_wake_word(self) -> None:
+        assert _wake_word_detected("qualquer coisa", "") is False
+
+
+class TestStripWakeWord:
+    def test_strips_wake_word(self) -> None:
+        result = _strip_wake_word("olá ambrósio como vais", "olá ambrósio")
+        assert result == "como vais"
+
+    def test_no_wake_word_returns_original(self) -> None:
+        result = _strip_wake_word("ola mundo", "olá ambrósio")
+        assert result == "ola mundo"
+
+
+class TestWakeWordMode:
+    def test_wake_word_detected_prints_remainder(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
+        fake_vad = MagicMock()
+        fake_vad.segment.return_value = iter([(0, FRAME_BYTES)])
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="olá ambrósio ligue as luzes",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    max_record_seconds=5.0,
+                )
+            )
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        assert out == "ligue as luzes"
+
+    def test_wake_word_not_detected_prints_nothing(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
+        fake_vad = MagicMock()
+        fake_vad.segment.return_value = iter([(0, FRAME_BYTES)])
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    max_record_seconds=0.0,
+                )
+            )
+        assert code == 0
+        captured = capsys.readouterr()
+        assert captured.out.strip() == ""
+        assert "wake word not detected" in captured.err.strip()
+
+    def test_no_wake_word_config_runs_normally(
+        self,
+        capsys: Any,
+    ) -> None:
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="",
+                )
+            )
+        assert code == 0
         out = capsys.readouterr().out.strip()
         assert out == "ola mundo"
 

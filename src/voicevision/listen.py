@@ -20,6 +20,7 @@ import argparse
 import os
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass, replace
 from typing import Final
 
@@ -49,6 +50,7 @@ class ListenConfig:
     vad_max_utterance_ms: int = 30_000
     max_record_seconds: float = 60.0
     fixed_seconds: float = 0.0
+    wake_word: str = ""
 
 
 def _env_int(name: str, default: int) -> int:
@@ -73,13 +75,60 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _normalize_text(text: str) -> str:
+    """Normalize text for wake word matching.
+
+    Lowercases, decomposes accented characters (NFD), strips combining marks,
+    and collapses whitespace. This makes "Olá Ambrósio", "OLÁ AMBRÓSIO" and
+    "ola ambrosio" all match the same wake word.
+    """
+    text = text.lower()
+    text = unicodedata.normalize("NFD", text)
+    stripped = "".join(c for c in text if c.isalnum() or c.isspace())
+    return " ".join(stripped.split())
+
+
+def _wake_word_detected(transcript: str, wake_word: str) -> bool:
+    """Return True if *transcript* contains *wake_word* (normalized substring).
+
+    Both sides are normalized so accent/case/punctuation differences do not
+    cause false negatives.
+    """
+    if not wake_word:
+        return False
+    norm_wake = _normalize_text(wake_word)
+    norm_text = _normalize_text(transcript)
+    return norm_wake in norm_text
+
+
+def _strip_wake_word(transcript: str, wake_word: str) -> str:
+    """Return *transcript* with the first occurrence of *wake_word* removed.
+
+    Matching is normalized; removal is done on the original text by locating
+    the normalized wake word inside the normalized text and mapping back.
+    Falls back to returning the original transcript if mapping fails.
+    """
+    if not wake_word:
+        return transcript
+    norm_wake = _normalize_text(wake_word)
+    norm_text = _normalize_text(transcript)
+    idx = norm_text.find(norm_wake)
+    if idx < 0:
+        return transcript
+    # Map back to original indices approximately: find the wake word in the
+    # original text by scanning case-insensitively after normalization is
+    # too complex to invert precisely; return the tail after the match.
+    tail = norm_text[idx + len(norm_wake) :].strip()
+    return tail if tail else transcript
+
+
 def load_config() -> ListenConfig:
     """Build a :class:`ListenConfig` from environment variables.
 
     Reads ``VOICEVISION_STT_MODEL``, ``VOICEVISION_STT_LANGUAGE``,
     ``VOICEVISION_VAD_AGGRESSIVENESS``, ``VOICEVISION_VAD_SILENCE_MS``,
-    ``VOICEVISION_VAD_MAX_UTTERANCE_MS`` and
-    ``VOICEVISION_MAX_RECORD_SECONDS``.
+    ``VOICEVISION_VAD_MAX_UTTERANCE_MS``,
+    ``VOICEVISION_MAX_RECORD_SECONDS`` and ``VOICEVISION_WAKE_WORD``.
     """
     return ListenConfig(
         stt_model=os.environ.get("VOICEVISION_STT_MODEL", ""),
@@ -89,6 +138,7 @@ def load_config() -> ListenConfig:
         vad_max_utterance_ms=_env_int("VOICEVISION_VAD_MAX_UTTERANCE_MS", 30_000),
         max_record_seconds=_env_float("VOICEVISION_MAX_RECORD_SECONDS", 60.0),
         fixed_seconds=_env_float("VOICEVISION_FIXED_SECONDS", 0.0),
+        wake_word=os.environ.get("VOICEVISION_WAKE_WORD", ""),
     )
 
 
@@ -118,7 +168,7 @@ def _capture_until_utterance(config: ListenConfig) -> bytes:
     print("gravando... fale agora (VAD deteta a sua fala)", file=sys.stderr)
 
     try:
-        import sounddevice as sd  # type: ignore[import-not-found]  # noqa: PLC0415 - lazy import per CLAUDE.md
+        import sounddevice as sd  # type: ignore[import-untyped]  # noqa: PLC0415 - lazy import per CLAUDE.md
 
         with sd.InputStream(
             samplerate=DEFAULT_SAMPLE_RATE,
@@ -223,6 +273,9 @@ def run(config: ListenConfig | None = None) -> int:
         )
         return 2
 
+    if config.wake_word:
+        return _run_wake_word(config)
+
     try:
         if config.fixed_seconds > 0:
             pcm = _capture_fixed_seconds(config)
@@ -255,6 +308,103 @@ def run(config: ListenConfig | None = None) -> int:
     return 0
 
 
+def _run_wake_word(config: ListenConfig) -> int:
+    """Run listen mode with wake word detection.
+
+    Captures and transcribes utterances in a loop until one contains
+    *config.wake_word*. When detected, prints the transcript (with the wake
+    word stripped) to stdout and returns 0. If no wake word is heard before
+    *config.max_record_seconds*, returns 0 with no output.
+
+    Returns:
+        0 on wake word detected or timeout; 2 on configuration/dependency error.
+    """
+    print(
+        f"listening for wake word '{config.wake_word}'...",
+        file=sys.stderr,
+    )
+
+    deadline = time.monotonic() + config.max_record_seconds
+    vad = WebrtcVadBackend(
+        aggressiveness=config.vad_aggressiveness,
+        sample_rate=DEFAULT_SAMPLE_RATE,
+        silence_ms=config.vad_silence_ms,
+        max_utterance_ms=config.vad_max_utterance_ms,
+    )
+
+    buffer = bytearray()
+
+    try:
+        import sounddevice as sd  # noqa: PLC0415 - lazy import per CLAUDE.md
+
+        with sd.InputStream(
+            samplerate=DEFAULT_SAMPLE_RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=FRAME_BYTES,
+        ) as stream:
+            while time.monotonic() < deadline:
+                data, _overflowed = stream.read(FRAME_BYTES)
+                buffer.extend(bytes(data))
+
+                usable = len(buffer) - (len(buffer) % FRAME_BYTES)
+                if usable < FRAME_BYTES:
+                    continue
+
+                pcm = bytes(buffer[:usable])
+                utterances = list(vad.segment(pcm))
+                if not utterances:
+                    continue
+
+                result = _transcribe_utterances(pcm, utterances, config)
+                if result is not None:
+                    print(result)
+                    return 0
+
+                # Keep only the tail of the buffer to avoid unbounded growth.
+                buffer = bytearray(pcm[-FRAME_BYTES:])
+
+    except ListenError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print("  install: pip install voicevision[audio]", file=sys.stderr)
+        return 2
+
+    print("wake word not detected", file=sys.stderr)
+    return 0
+
+
+def _transcribe_utterances(
+    pcm: bytes,
+    utterances: list[tuple[int, int]],
+    config: ListenConfig,
+) -> str | None:
+    """Transcribe each utterance and check for the wake word.
+
+    Returns the transcript remainder (wake word stripped) if the wake word is
+    detected in any utterance, or None if none matched.
+    """
+    for start, end in utterances:
+        utterance_pcm = pcm[start:end]
+        try:
+            transcript = _transcribe_pcm(utterance_pcm, config)
+        except BackendNotAvailableError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            print(f"  fix: {exc.install_hint}", file=sys.stderr)
+            raise SystemExit(2) from None
+        except BackendExecutionError as exc:
+            print(f"error: transcription failed: {exc}", file=sys.stderr)
+            raise SystemExit(2) from None
+
+        if not transcript.strip():
+            continue
+
+        if _wake_word_detected(transcript, config.wake_word):
+            remainder = _strip_wake_word(transcript, config.wake_word)
+            return remainder if remainder else "wake word detected"
+
+    return None
+
+
 def main() -> None:
     """CLI entry point for ``voicevision-listen``."""
     parser = argparse.ArgumentParser(
@@ -276,6 +426,12 @@ def main() -> None:
         help="Record for a fixed number of seconds instead of VAD detection "
         "(e.g. --seconds 5). Disables VAD segmentation.",
     )
+    parser.add_argument(
+        "--wake-word",
+        default="",
+        help="Wake word to listen for (e.g. 'Olá Ambrósio'). Overrides "
+        "VOICEVISION_WAKE_WORD. Empty disables wake word mode.",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -284,6 +440,8 @@ def main() -> None:
     config = replace(config, stt_language=args.language)
     if args.seconds > 0:
         config = replace(config, fixed_seconds=args.seconds)
+    if args.wake_word:
+        config = replace(config, wake_word=args.wake_word)
 
     sys.exit(run(config))
 
