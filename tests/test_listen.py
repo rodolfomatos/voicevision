@@ -10,7 +10,7 @@ import os
 import sys
 from types import ModuleType
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -26,11 +26,13 @@ from voicevision.listen import (
     FRAME_BYTES,
     ListenConfig,
     ListenError,
+    PreRollBuffer,
     _capture_fixed_seconds,
     _capture_until_utterance,
     _env_float,
     _env_int,
     _normalize_text,
+    _pre_roll_bytes,
     _strip_wake_word,
     _transcribe_pcm,
     _wake_word_detected,
@@ -75,6 +77,9 @@ class TestLoadConfig:
         assert cfg.vad_silence_ms == 500
         assert cfg.vad_max_utterance_ms == 30_000
         assert cfg.max_record_seconds == 60.0
+        assert cfg.fixed_seconds == 0.0
+        assert cfg.wake_word == ""
+        assert cfg.pre_roll_seconds == 0.0
 
     def test_from_env(self, monkeypatch: Any) -> None:
         monkeypatch.setenv("VOICEVISION_STT_MODEL", "/models/whisper-base.bin")
@@ -82,12 +87,16 @@ class TestLoadConfig:
         monkeypatch.setenv("VOICEVISION_VAD_AGGRESSIVENESS", "1")
         monkeypatch.setenv("VOICEVISION_VAD_SILENCE_MS", "300")
         monkeypatch.setenv("VOICEVISION_MAX_RECORD_SECONDS", "30")
+        monkeypatch.setenv("VOICEVISION_WAKE_WORD", "olá ambrósio")
+        monkeypatch.setenv("VOICEVISION_PRE_ROLL_SECONDS", "5")
         cfg = load_config()
         assert cfg.stt_model == "/models/whisper-base.bin"
         assert cfg.stt_language == "pt"
         assert cfg.vad_aggressiveness == 1
         assert cfg.vad_silence_ms == 300
         assert cfg.max_record_seconds == 30.0
+        assert cfg.wake_word == "olá ambrósio"
+        assert cfg.pre_roll_seconds == 5.0
 
 
 # -- sounddevice fake --------------------------------------------------------
@@ -125,6 +134,23 @@ def _install_fake_sounddevice(monkeypatch: Any, frames: list[bytes]) -> None:
     monkeypatch.setitem(sys.modules, "sounddevice", fake)
 
 
+class FakeVadBackend:
+    """Fake VAD backend for testing. Returns configured utterances in order.
+    Each element of the utterance_list is itself a list of (start, end) tuples,
+    or [] to indicate no utterance detected.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.utterance_list = list(kwargs.get("utterances", [[(0, FRAME_BYTES)]]))
+        self.call_count = 0
+
+    def segment(self, pcm: bytes) -> list[tuple[int, int]]:
+        self.call_count += 1
+        if self.utterance_list:
+            return self.utterance_list.pop(0)
+        return []
+
+
 # -- capture -----------------------------------------------------------------
 
 
@@ -135,8 +161,7 @@ class TestCapture:
     ) -> None:
         """One frame of audio, VAD reports an utterance covering it all."""
         _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
-        fake_vad = MagicMock()
-        fake_vad.segment.return_value = iter([(0, FRAME_BYTES)])
+        fake_vad = FakeVadBackend(utterances=[[(0, FRAME_BYTES)]])
         with patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad):
             pcm = _capture_until_utterance(
                 ListenConfig(max_record_seconds=60.0),
@@ -149,8 +174,7 @@ class TestCapture:
     ) -> None:
         """VAD never detects speech; capture returns empty before the deadline."""
         _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
-        fake_vad = MagicMock()
-        fake_vad.segment.return_value = iter([])
+        fake_vad = FakeVadBackend(utterances=[])
         with patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad):
             pcm = _capture_until_utterance(
                 ListenConfig(max_record_seconds=0.0),
@@ -164,7 +188,7 @@ class TestCapture:
         """ImportError from sounddevice becomes a ListenError with a hint."""
         monkeypatch.setitem(sys.modules, "sounddevice", None)
         with (
-            patch("voicevision.listen.WebrtcVadBackend", return_value=MagicMock()),
+            patch("voicevision.listen.WebrtcVadBackend", return_value=FakeVadBackend()),
             pytest.raises(ListenError, match="sounddevice"),
         ):
             _capture_until_utterance(ListenConfig(max_record_seconds=60.0))
@@ -387,6 +411,53 @@ class TestStripWakeWord:
         assert result == "ola mundo"
 
 
+class TestPreRollBuffer:
+    def test_push_and_get(self) -> None:
+        buf = PreRollBuffer(100)
+        buf.push(b"\x00" * 40)
+        buf.push(b"\x01" * 40)
+        assert buf.get() == b"\x00" * 40 + b"\x01" * 40
+        assert buf.size() == 80
+
+    def test_wraparound(self) -> None:
+        buf = PreRollBuffer(100)
+        buf.push(b"\x00" * 60)
+        buf.push(b"\x01" * 60)  # overwrites first 20 bytes of the 60
+        data = buf.get()
+        assert len(data) == 100
+        assert data[:40] == b"\x00" * 40  # tail of first push
+        assert data[40:] == b"\x01" * 60  # all of second push
+
+    def test_clear(self) -> None:
+        buf = PreRollBuffer(100)
+        buf.push(b"\x00" * 40)
+        assert buf.size() == 40
+        buf.clear()
+        assert buf.size() == 0
+        assert buf.get() == b""
+
+    def test_max_bytes_zero(self) -> None:
+        """max_bytes=0 means unlimited buffer."""
+        buf = PreRollBuffer(0)
+        buf.push(b"\x00" * 40)
+        assert buf.size() == 40
+        assert buf.get() == b"\x00" * 40
+
+    def test_larger_than_buffer(self) -> None:
+        buf = PreRollBuffer(40)
+        buf.push(b"\x00" * 100)  # larger than buffer
+        assert buf.size() == 40
+        assert buf.get() == b"\x00" * 40  # only the tail
+
+
+class TestPreRollBytes:
+    def test_calculation(self) -> None:
+        # 1 second at 16 kHz mono PCM16 = 32000 bytes
+        assert _pre_roll_bytes(1.0) == 32000
+        assert _pre_roll_bytes(2.0) == 64000
+        assert _pre_roll_bytes(0.0) == 0
+
+
 class TestWakeWordMode:
     def test_wake_word_detected_prints_remainder(
         self,
@@ -394,8 +465,7 @@ class TestWakeWordMode:
         capsys: Any,
     ) -> None:
         _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
-        fake_vad = MagicMock()
-        fake_vad.segment.return_value = iter([(0, FRAME_BYTES)])
+        fake_vad = FakeVadBackend(utterances=[[(0, FRAME_BYTES)]])
         with (
             patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
             patch(
@@ -420,8 +490,7 @@ class TestWakeWordMode:
         capsys: Any,
     ) -> None:
         _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
-        fake_vad = MagicMock()
-        fake_vad.segment.return_value = iter([(0, FRAME_BYTES)])
+        fake_vad = FakeVadBackend(utterances=[[(0, FRAME_BYTES)]])
         with (
             patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
             patch(
@@ -464,6 +533,63 @@ class TestWakeWordMode:
         assert code == 0
         out = capsys.readouterr().out.strip()
         assert out == "ola mundo"
+
+
+class TestPreRollWakeWordMode:
+    def test_pre_roll_prepended_to_utterance(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """Pre-roll audio is included in the transcription when wake word is detected."""
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES, b"\x01" * FRAME_BYTES])
+        fake_vad = FakeVadBackend(utterances=[[], [(0, FRAME_BYTES)]])
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="olá ambrósio ligue as luzes",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    pre_roll_seconds=2.0,
+                    max_record_seconds=5.0,
+                )
+            )
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        assert out == "ligue as luzes"
+        assert fake_vad.call_count == 2
+
+    def test_pre_roll_zero_disabled(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """pre_roll_seconds=0 means no pre-roll audio is included."""
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
+        fake_vad = FakeVadBackend(utterances=[[(0, FRAME_BYTES)]])
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="olá ambrósio",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    pre_roll_seconds=0.0,
+                    max_record_seconds=5.0,
+                )
+            )
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        assert out == "wake word detected"
 
 
 # -- integration -------------------------------------------------------------

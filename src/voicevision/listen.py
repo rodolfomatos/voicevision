@@ -35,6 +35,83 @@ DEFAULT_SAMPLE_RATE: Final = 16_000
 FRAME_BYTES: Final = (DEFAULT_SAMPLE_RATE * 30 // 1000) * 2
 
 
+class PreRollBuffer:
+    """Fixed-size circular buffer of PCM16 audio bytes.
+
+    Holds the last *max_bytes* of audio so that, when a wake word is detected,
+    the audio leading up to it (including the start of the utterance) is not
+    lost. 16 kHz mono PCM16 is 32 KB/s, so a 10 s buffer is ~320 KB.
+
+    A *max_bytes* of 0 means unlimited (no pre-roll limit, pass-through).
+
+    Not thread-safe: a single caller pushes and reads.
+    """
+
+    def __init__(self, max_bytes: int) -> None:
+        if max_bytes < 0:
+            raise ValueError("max_bytes must be non-negative")
+        self._unbounded = max_bytes == 0
+        self._max_bytes = max_bytes or (1 << 62)  # 0 means unlimited
+        self._buf = bytearray(self._max_bytes) if not self._unbounded else bytearray()
+        self._write = 0
+        self._filled = 0
+
+    def push(self, data: bytes) -> None:
+        """Append *data* to the buffer, overwriting the oldest bytes if full."""
+        n = len(data)
+        if n == 0:
+            return
+        if self._unbounded:
+            self._buf.extend(data)
+            self._filled = len(self._buf)
+            self._write = len(self._buf)
+            return
+        if n >= self._max_bytes:
+            # Data is larger than the whole buffer: keep only the tail.
+            self._buf[:] = data[-self._max_bytes :]
+            self._write = 0
+            self._filled = self._max_bytes
+            return
+        if self._write + n <= self._max_bytes:
+            self._buf[self._write : self._write + n] = data
+            self._write += n
+        else:
+            # Wraps around the end of the buffer.
+            first = self._max_bytes - self._write
+            self._buf[self._write :] = data[:first]
+            self._buf[: n - first] = data[first:]
+            self._write = n - first
+        self._filled = min(self._filled + n, self._max_bytes)
+
+    def get(self) -> bytes:
+        """Return all buffered audio in chronological order."""
+        if self._filled == 0:
+            return b""
+        if self._unbounded:
+            return bytes(self._buf)
+        if self._filled == self._max_bytes and self._write == 0:
+            return bytes(self._buf)
+        # Buffer wrapped: tail + head.
+        start = (self._write - self._filled) % self._max_bytes
+        end = self._write
+        if start < end:
+            return bytes(self._buf[start:end])
+        return bytes(self._buf[start:]) + bytes(self._buf[:end])
+
+    def clear(self) -> None:
+        """Empty the buffer."""
+        self._write = 0
+        self._filled = 0
+        if not self._unbounded:
+            self._buf = bytearray(self._max_bytes)
+        else:
+            self._buf = bytearray()
+
+    def size(self) -> int:
+        """Return the number of bytes currently buffered."""
+        return self._filled
+
+
 @dataclass
 class ListenConfig:
     """Configuration for listen mode, read from the environment.
@@ -51,6 +128,7 @@ class ListenConfig:
     max_record_seconds: float = 60.0
     fixed_seconds: float = 0.0
     wake_word: str = ""
+    pre_roll_seconds: float = 0.0
 
 
 def _env_int(name: str, default: int) -> int:
@@ -101,25 +179,9 @@ def _wake_word_detected(transcript: str, wake_word: str) -> bool:
     return norm_wake in norm_text
 
 
-def _strip_wake_word(transcript: str, wake_word: str) -> str:
-    """Return *transcript* with the first occurrence of *wake_word* removed.
-
-    Matching is normalized; removal is done on the original text by locating
-    the normalized wake word inside the normalized text and mapping back.
-    Falls back to returning the original transcript if mapping fails.
-    """
-    if not wake_word:
-        return transcript
-    norm_wake = _normalize_text(wake_word)
-    norm_text = _normalize_text(transcript)
-    idx = norm_text.find(norm_wake)
-    if idx < 0:
-        return transcript
-    # Map back to original indices approximately: find the wake word in the
-    # original text by scanning case-insensitively after normalization is
-    # too complex to invert precisely; return the tail after the match.
-    tail = norm_text[idx + len(norm_wake) :].strip()
-    return tail if tail else transcript
+def _pre_roll_bytes(seconds: float) -> int:
+    """Return the number of PCM16 bytes for *seconds* of 16 kHz mono audio."""
+    return int(seconds * DEFAULT_SAMPLE_RATE * 2)
 
 
 def load_config() -> ListenConfig:
@@ -128,7 +190,8 @@ def load_config() -> ListenConfig:
     Reads ``VOICEVISION_STT_MODEL``, ``VOICEVISION_STT_LANGUAGE``,
     ``VOICEVISION_VAD_AGGRESSIVENESS``, ``VOICEVISION_VAD_SILENCE_MS``,
     ``VOICEVISION_VAD_MAX_UTTERANCE_MS``,
-    ``VOICEVISION_MAX_RECORD_SECONDS`` and ``VOICEVISION_WAKE_WORD``.
+    ``VOICEVISION_MAX_RECORD_SECONDS``, ``VOICEVISION_WAKE_WORD`` and
+    ``VOICEVISION_PRE_ROLL_SECONDS``.
     """
     return ListenConfig(
         stt_model=os.environ.get("VOICEVISION_STT_MODEL", ""),
@@ -139,6 +202,7 @@ def load_config() -> ListenConfig:
         max_record_seconds=_env_float("VOICEVISION_MAX_RECORD_SECONDS", 60.0),
         fixed_seconds=_env_float("VOICEVISION_FIXED_SECONDS", 0.0),
         wake_word=os.environ.get("VOICEVISION_WAKE_WORD", ""),
+        pre_roll_seconds=_env_float("VOICEVISION_PRE_ROLL_SECONDS", 0.0),
     )
 
 
@@ -332,7 +396,7 @@ def _run_wake_word(config: ListenConfig) -> int:
         max_utterance_ms=config.vad_max_utterance_ms,
     )
 
-    buffer = bytearray()
+    pre_roll = PreRollBuffer(_pre_roll_bytes(config.pre_roll_seconds))
 
     try:
         import sounddevice as sd  # noqa: PLC0415 - lazy import per CLAUDE.md
@@ -345,24 +409,23 @@ def _run_wake_word(config: ListenConfig) -> int:
         ) as stream:
             while time.monotonic() < deadline:
                 data, _overflowed = stream.read(FRAME_BYTES)
-                buffer.extend(bytes(data))
+                pre_roll.push(bytes(data))
 
-                usable = len(buffer) - (len(buffer) % FRAME_BYTES)
+                pcm = pre_roll.get()
+                usable = len(pcm) - (len(pcm) % FRAME_BYTES)
                 if usable < FRAME_BYTES:
                     continue
 
-                pcm = bytes(buffer[:usable])
-                utterances = list(vad.segment(pcm))
+                utterances = list(vad.segment(pcm[:usable]))
                 if not utterances:
                     continue
 
-                result = _transcribe_utterances(pcm, utterances, config)
+                result = _transcribe_utterances(
+                    pcm[:usable], utterances, config, _pre_roll_bytes(config.pre_roll_seconds)
+                )
                 if result is not None:
                     print(result)
                     return 0
-
-                # Keep only the tail of the buffer to avoid unbounded growth.
-                buffer = bytearray(pcm[-FRAME_BYTES:])
 
     except ListenError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -377,14 +440,20 @@ def _transcribe_utterances(
     pcm: bytes,
     utterances: list[tuple[int, int]],
     config: ListenConfig,
+    pre_roll_bytes: int = 0,
 ) -> str | None:
     """Transcribe each utterance and check for the wake word.
+
+    When *pre_roll_bytes* > 0, the audio immediately preceding each utterance
+    (up to *pre_roll_bytes*) is prepended so the wake word's lead-in is not
+    lost to VAD segmentation.
 
     Returns the transcript remainder (wake word stripped) if the wake word is
     detected in any utterance, or None if none matched.
     """
     for start, end in utterances:
-        utterance_pcm = pcm[start:end]
+        pre_roll_start = max(0, start - pre_roll_bytes)
+        utterance_pcm = pcm[pre_roll_start:end]
         try:
             transcript = _transcribe_pcm(utterance_pcm, config)
         except BackendNotAvailableError as exc:
@@ -403,6 +472,22 @@ def _transcribe_utterances(
             return remainder if remainder else "wake word detected"
 
     return None
+
+
+def _strip_wake_word(transcript: str, wake_word: str) -> str:
+    """Return *transcript* with the first occurrence of *wake_word* removed.
+
+    Matching is normalized; removal is done on the normalized text. Returns
+    an empty string when the wake word accounts for the entire transcript.
+    """
+    if not wake_word:
+        return transcript
+    norm_wake = _normalize_text(wake_word)
+    norm_text = _normalize_text(transcript)
+    idx = norm_text.find(norm_wake)
+    if idx < 0:
+        return transcript
+    return norm_text[idx + len(norm_wake) :].strip()
 
 
 def main() -> None:
@@ -432,6 +517,13 @@ def main() -> None:
         help="Wake word to listen for (e.g. 'Olá Ambrósio'). Overrides "
         "VOICEVISION_WAKE_WORD. Empty disables wake word mode.",
     )
+    parser.add_argument(
+        "--pre-roll-seconds",
+        type=float,
+        default=0.0,
+        help="Seconds of audio to prepend before each utterance when wake "
+        "word mode is active (e.g. --pre-roll-seconds 2). Default: 0.",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -442,6 +534,8 @@ def main() -> None:
         config = replace(config, fixed_seconds=args.seconds)
     if args.wake_word:
         config = replace(config, wake_word=args.wake_word)
+    if args.pre_roll_seconds > 0:
+        config = replace(config, pre_roll_seconds=args.pre_roll_seconds)
 
     sys.exit(run(config))
 
