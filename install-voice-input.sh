@@ -103,13 +103,23 @@ MODEL_SIZE=$(du -h "$MODEL_PATH" | cut -f1)
 echo "  ✓ modelo STT: $MODEL_PATH ($MODEL_SIZE)"
 echo ""
 
-# --- 4. Instalar pacote Python voicevision ---
-echo "[4/6] Instalando pacote Python voicevision..."
+# --- 4. Instalar pacote Python voicevision (com extra de áudio) ---
+echo "[4/6] Instalando pacote Python voicevision (com suporte a áudio)..."
 cd "$PROJECT_ROOT"
 if ! python3 -m pip install --break-system-packages --ignore-installed -e . ; then
     echo "Erro: falha ao instalar o pacote Python voicevision." >&2
     echo "Tente executar manualmente: cd $PROJECT_ROOT && python3 -m pip install --break-system-packages --ignore-installed -e ." >&2
     exit 1
+fi
+
+# sounddevice é um extra opcional do voicevision; precisa dele para captura de microfone
+if ! python3 -c "import sounddevice" 2>/dev/null; then
+    echo "  ⚠ sounddevice não encontrado — instalando extra de áudio..."
+    if ! python3 -m pip install --break-system-packages "sounddevice>=0.4.6" ; then
+        echo "Erro: falha ao instalar sounddevice (captura de microfone)." >&2
+        echo "Tente: python3 -m pip install --break-system-packages sounddevice>=0.4.6" >&2
+        exit 1
+    fi
 fi
 
 if ! command -v voicevision-listen >/dev/null 2>&1; then

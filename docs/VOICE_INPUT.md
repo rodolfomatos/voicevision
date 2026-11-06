@@ -27,7 +27,7 @@ O que este comando faz, automaticamente:
 1. Instala dependências de sistema: `xclip`, `cmake`, `build-essential`, `git`, `curl`, `python3-pip`
 2. Clona whisper.cpp e constrói o binário `whisper-cli` (instalado em `/usr/local/bin`)
 3. Baixa o modelo `whisper-base.bin` para `/models/`
-4. Instala o pacote Python `voicevision` (`pip install -e .`)
+4. Instala o pacote Python `voicevision` (`pip install -e .`) com suporte a áudio (`sounddevice`)
 5. Instala o wrapper `~/.local/bin/voicevision-listen-and-copy`
 6. Configura `VOICEVISION_STT_MODEL` e `VOICEVISION_STT_LANGUAGE` em `~/.bashrc`
 
@@ -93,6 +93,17 @@ Se ouvir a notificação e o texto estiver no clipboard, está a funcionar.
 | Microfone ausente | Se o OpenCode correr num container sem `/dev/snd`, falha com erro claro |
 | Modelo STT | O `whisper-base.bin` é baixado automaticamente pelo `make install-voice-input` |
 | xclip | Necessário no X11; em Wayland, usa `wl-copy` em vez de `xclip` |
+| VAD sensível | O WebRTC VAD pode não detetar vozes baixas ou ruído de fundo. Use `voicevision-listen --seconds 5` para gravação por tempo fixo em vez de deteção por VAD. |
+
+## Fallback: gravação por tempo fixo
+
+Se o VAD não detetar a sua fala (voz muito baixa, ruído de fundo), use o modo de tempo fixo:
+
+```bash
+voicevision-listen --seconds 5
+```
+
+Isso grava durante 5 segundos independentemente de deteção de voz, depois transcreve. O wrapper `voicevision-listen-and-copy` já usa este modo por défaut (5 segundos).
 
 ---
 

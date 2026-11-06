@@ -26,6 +26,7 @@ from voicevision.listen import (
     FRAME_BYTES,
     ListenConfig,
     ListenError,
+    _capture_fixed_seconds,
     _capture_until_utterance,
     _env_float,
     _env_int,
@@ -165,6 +166,25 @@ class TestCapture:
         ):
             _capture_until_utterance(ListenConfig(max_record_seconds=60.0))
 
+    def test_capture_fixed_seconds_returns_all_frames(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """Fixed-duration capture returns the full number of frames."""
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES, b"\x01" * FRAME_BYTES])
+        pcm = _capture_fixed_seconds(
+            ListenConfig(fixed_seconds=0.12),  # 2 frames at 16 kHz 30 ms
+        )
+        assert pcm == b"\x00" * FRAME_BYTES + b"\x01" * FRAME_BYTES
+
+    def test_capture_fixed_seconds_raises_when_sounddevice_missing(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "sounddevice", None)
+        with pytest.raises(ListenError, match="sounddevice"):
+            _capture_fixed_seconds(ListenConfig(fixed_seconds=5.0))
+
 
 # -- transcription -----------------------------------------------------------
 
@@ -279,6 +299,36 @@ class TestRun:
         assert code == 2
         err = capsys.readouterr().err.strip()
         assert "transcription failed" in err
+
+    def test_fixed_seconds_uses_fixed_capture(
+        self,
+        capsys: Any,
+    ) -> None:
+        """When fixed_seconds > 0, _capture_fixed_seconds is used instead of VAD."""
+        with (
+            patch(
+                "voicevision.listen._capture_fixed_seconds",
+                return_value=b"\x00" * FRAME_BYTES,
+            ) as mock_fixed,
+            patch(
+                "voicevision.listen._capture_until_utterance",
+            ) as mock_vad,
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    fixed_seconds=5.0,
+                )
+            )
+        assert code == 0
+        mock_fixed.assert_called_once()
+        mock_vad.assert_not_called()
+        out = capsys.readouterr().out.strip()
+        assert out == "ola mundo"
 
 
 # -- integration -------------------------------------------------------------

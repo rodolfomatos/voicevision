@@ -48,6 +48,7 @@ class ListenConfig:
     vad_silence_ms: int = 500
     vad_max_utterance_ms: int = 30_000
     max_record_seconds: float = 60.0
+    fixed_seconds: float = 0.0
 
 
 def _env_int(name: str, default: int) -> int:
@@ -87,6 +88,7 @@ def load_config() -> ListenConfig:
         vad_silence_ms=_env_int("VOICEVISION_VAD_SILENCE_MS", 500),
         vad_max_utterance_ms=_env_int("VOICEVISION_VAD_MAX_UTTERANCE_MS", 30_000),
         max_record_seconds=_env_float("VOICEVISION_MAX_RECORD_SECONDS", 60.0),
+        fixed_seconds=_env_float("VOICEVISION_FIXED_SECONDS", 0.0),
     )
 
 
@@ -112,6 +114,8 @@ def _capture_until_utterance(config: ListenConfig) -> bytes:
 
     buffer = bytearray()
     deadline = time.monotonic() + config.max_record_seconds
+
+    print("gravando... fale agora (VAD deteta a sua fala)", file=sys.stderr)
 
     try:
         import sounddevice as sd  # type: ignore[import-not-found]  # noqa: PLC0415 - lazy import per CLAUDE.md
@@ -143,6 +147,44 @@ def _capture_until_utterance(config: ListenConfig) -> bytes:
     except OSError as exc:
         raise ListenError(f"could not open microphone: {exc}") from exc
 
+    return bytes(buffer)
+
+
+def _capture_fixed_seconds(config: ListenConfig) -> bytes:
+    """Capture PCM16 mono from the microphone for a fixed number of seconds.
+
+    Falls back to time-based capture when VAD segmentation is unreliable
+    (e.g. background noise, quiet voice, no speech detected).
+
+    Returns raw PCM16 bytes covering the full recording duration.
+    """
+    total_frames = int(DEFAULT_SAMPLE_RATE * config.fixed_seconds)
+    buffer = bytearray()
+
+    print(f"gravando por {config.fixed_seconds:.0f}s — fale agora...", file=sys.stderr)
+
+    try:
+        import sounddevice as sd  # noqa: PLC0415 - lazy import per CLAUDE.md
+
+        with sd.InputStream(
+            samplerate=DEFAULT_SAMPLE_RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=FRAME_BYTES,
+        ) as stream:
+            while len(buffer) < total_frames:
+                remaining = total_frames - len(buffer)
+                block = min(FRAME_BYTES, remaining)
+                data, _overflowed = stream.read(block)
+                buffer.extend(bytes(data))
+    except ImportError as exc:
+        raise ListenError(
+            "sounddevice is not installed — microphone capture unavailable",
+        ) from exc
+    except OSError as exc:
+        raise ListenError(f"could not open microphone: {exc}") from exc
+
+    print("gravação terminada.", file=sys.stderr)
     return bytes(buffer)
 
 
@@ -182,7 +224,10 @@ def run(config: ListenConfig | None = None) -> int:
         return 2
 
     try:
-        pcm = _capture_until_utterance(config)
+        if config.fixed_seconds > 0:
+            pcm = _capture_fixed_seconds(config)
+        else:
+            pcm = _capture_until_utterance(config)
     except ListenError as exc:
         print(f"error: {exc}", file=sys.stderr)
         print("  install: pip install voicevision[audio]", file=sys.stderr)
@@ -224,12 +269,21 @@ def main() -> None:
         default="en",
         help="STT language code (default: en)",
     )
+    parser.add_argument(
+        "--seconds",
+        type=float,
+        default=0.0,
+        help="Record for a fixed number of seconds instead of VAD detection "
+        "(e.g. --seconds 5). Disables VAD segmentation.",
+    )
     args = parser.parse_args()
 
     config = load_config()
     if args.model:
         config = replace(config, stt_model=args.model)
     config = replace(config, stt_language=args.language)
+    if args.seconds > 0:
+        config = replace(config, fixed_seconds=args.seconds)
 
     sys.exit(run(config))
 

@@ -3,7 +3,7 @@
 #
 # Fluxo:
 #   1. pressiona o hotkey global
-#   2. roda `voicevision-listen` (microfone → whisper.cpp → texto no stdout)
+#   2. roda `voicevision-listen --seconds 5` (grava 5s, transcreve via whisper.cpp)
 #   3. copia o texto para o clipboard (xclip)
 #   4. no OpenCode, focas o input e colas com ctrl+v
 #
@@ -13,10 +13,10 @@
 #   - VOICEVISION_STT_MODEL definido (export no ~/.bashrc)
 set -eu
 
-TEXT=$(voicevision-listen 2>/dev/null || true)
+TEXT=$(voicevision-listen --seconds 5 2>/dev/null || true)
 
 if [ -z "$TEXT" ]; then
-    notify-send "voicevision" "Nenhuma fala detetada ou erro na transcrição" 2>/dev/null || true
+    notify-send "voicevision" "Nenhuma fala detetada" 2>/dev/null || true
     exit 0
 fi
 
