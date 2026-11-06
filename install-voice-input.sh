@@ -106,7 +106,13 @@ echo ""
 # --- 4. Instalar pacote Python voicevision ---
 echo "[4/6] Instalando pacote Python voicevision..."
 cd "$PROJECT_ROOT"
-pip3 install -e . >/dev/null 2>&1 || pip3 install --break-system-packages -e . >/dev/null 2>&1
+if ! pip3 install -e . >/dev/null 2>&1; then
+    if ! pip3 install --break-system-packages -e . >/dev/null 2>&1; then
+        echo "Erro: falha ao instalar o pacote Python voicevision." >&2
+        echo "Tente executar manualmente: cd $PROJECT_ROOT && pip3 install --break-system-packages -e ." >&2
+        exit 1
+    fi
+fi
 
 if ! command -v voicevision-listen >/dev/null 2>&1; then
     echo "Erro: voicevision-listen não está no PATH após a instalação do pacote." >&2
