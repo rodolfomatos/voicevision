@@ -52,6 +52,9 @@ class PipelineConfig:
     # Filter
     enable_thinking_filter: bool = True
 
+    # Conversation memory
+    max_context_utterances: int = 5
+
 
 class VoicePipeline:
     """End-to-end voice pipeline: audio in -> audio out."""
@@ -65,6 +68,9 @@ class VoicePipeline:
         self._llm: Any = None
         self._tts: Any = None
         self._vision: Any = None
+
+        # Conversation memory
+        self._conversation_history: list[tuple[str, str]] = []
 
     # -- lazy backend accessors ------------------------------------------------
 
@@ -156,8 +162,10 @@ class VoicePipeline:
             if not transcript.strip():
                 continue  # Skip empty transcripts
 
-            # 3. LLM: generate response
-            completion = self.llm.complete(transcript)
+            # 3. LLM: generate response with conversation context
+            context = self._build_conversation_context()
+            prompt = f"{context}User: {transcript}\nAssistant:" if context else transcript
+            completion = self.llm.complete(prompt)
             response_text = completion.content
 
             # 4. Filter: strip thinking traces if enabled
@@ -167,7 +175,10 @@ class VoicePipeline:
             if not response_text.strip():
                 continue
 
-            # 5. TTS: synthesize response
+            # 5. Store in conversation history
+            self._conversation_history.append((transcript, response_text))
+
+            # 6. TTS: synthesize response
             output_chunks.append(self.tts.synthesize(response_text))
 
         # Concatenate all speech chunks
@@ -255,6 +266,26 @@ class VoicePipeline:
         # 2b. No LLM configured: return description as text (no TTS)
         return description.encode("utf-8")
 
+    def _build_conversation_context(self) -> str:
+        """Build conversation context from recent history.
+
+        Returns a formatted string with recent conversation turns,
+        limited to max_context_utterances to avoid exceeding context window.
+        """
+        if not self._conversation_history:
+            return ""
+
+        recent = self._conversation_history[-self.config.max_context_utterances :]
+        lines = []
+        for user_text, assistant_text in recent:
+            lines.append(f"User: {user_text}")
+            lines.append(f"Assistant: {assistant_text}")
+        return "\n".join(lines) + "\n"
+
+    def reset_context(self) -> None:
+        """Clear conversation history."""
+        self._conversation_history = []
+
     def _filter_thinking(self, text: str) -> str:
         """Strip qwen3 reasoning traces from LLM output.
 
@@ -281,6 +312,7 @@ class VoicePipeline:
 
     def close(self) -> None:
         """Release all backend resources."""
+        self.reset_context()
         for backend in (
             self._vad,
             self._stt,

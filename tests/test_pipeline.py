@@ -326,3 +326,136 @@ class TestPipelineConfigValidation:
         pipeline = VoicePipeline(config)
         with pytest.raises(ValueError, match="tts_model must be configured"):
             _ = pipeline.tts
+
+
+class TestConversationMemory:
+    def test_memory_retained_across_calls(self, mock_backends) -> None:
+        """Conversation history is retained across multiple process() calls."""
+        mock_backends["vad_instance"].segment.side_effect = [
+            [(0, 960)],  # First call: "hello"
+            [(0, 960)],  # Second call: "how are you?"
+        ]
+        mock_backends["stt_instance"].transcribe.side_effect = ["hello", "how are you?"]
+        mock_backends["llm_instance"].complete.side_effect = [
+            type("Completion", (), {"content": "hi", "thinking": ""})(),
+            type("Completion", (), {"content": "fine thanks", "thinking": ""})(),
+        ]
+        mock_backends["tts_instance"].synthesize.side_effect = [b"wav1", b"wav2"]
+
+        config = PipelineConfig(
+            stt_model="/m.bin",
+            llm_model="/m.gguf",
+            tts_model="/m.onnx",
+        )
+        pipeline = VoicePipeline(config)
+
+        # First call
+        result1 = pipeline.process(b"x" * 960)
+        assert result1 == b"wav1"
+
+        # Second call should include context from first call
+        result2 = pipeline.process(b"x" * 960)
+        assert result2 == b"wav2"
+
+        # Verify second LLM call included conversation context
+        call_args = mock_backends["llm_instance"].complete.call_args_list
+        assert len(call_args) == 2
+        second_call_arg = call_args[1][0][0]  # First positional arg
+        assert "hello" in second_call_arg
+        assert "how are you?" in second_call_arg
+
+    def test_memory_pruned_when_exceeding_max(self, mock_backends) -> None:
+        """Old utterances beyond max_context_utterances are dropped from context."""
+        mock_backends["vad_instance"].segment.side_effect = [
+            [(0, 960)],  # Call 1
+            [(0, 960)],  # Call 2
+            [(0, 960)],  # Call 3
+            [(0, 960)],  # Call 4
+            [(0, 960)],  # Call 5
+            [(0, 960)],  # Call 6 - should exceed max (5)
+        ]
+        mock_backends["stt_instance"].transcribe.side_effect = [
+            "one",
+            "two",
+            "three",
+            "four",
+            "five",
+            "six",
+        ]
+        mock_backends["llm_instance"].complete.side_effect = [
+            type("Completion", (), {"content": f"resp{i}", "thinking": ""})() for i in range(1, 7)
+        ]
+        mock_backends["tts_instance"].synthesize.side_effect = [
+            f"wav{i}".encode() for i in range(1, 7)
+        ]
+
+        config = PipelineConfig(
+            stt_model="/m.bin",
+            llm_model="/m.gguf",
+            tts_model="/m.onnx",
+            max_context_utterances=3,
+        )
+        pipeline = VoicePipeline(config)
+
+        result = pipeline.process(b"x" * 960)
+        assert result == b"wav1"
+
+        # 6th call: only last 3 utterances should be in context
+        pipeline.process(b"x" * 960)
+        pipeline.process(b"x" * 960)
+        pipeline.process(b"x" * 960)
+        pipeline.process(b"x" * 960)
+        pipeline.process(b"x" * 960)
+
+        call_args = mock_backends["llm_instance"].complete.call_args_list
+        assert len(call_args) == 6
+
+        # 6th call should only contain last 3 utterances before this call:
+        # three, four, five. "six" is the current utterance being processed.
+        last_call_arg = call_args[5][0][0]
+        assert "three" in last_call_arg
+        assert "four" in last_call_arg
+        assert "five" in last_call_arg
+        assert "one" not in last_call_arg
+        assert "two" not in last_call_arg
+        # "six" appears exactly once as the current utterance
+        assert last_call_arg.count("six") == 1
+
+    def test_reset_context_clears_memory(self, mock_backends) -> None:
+        """reset_context() clears conversation history."""
+        mock_backends["vad_instance"].segment.side_effect = [
+            [(0, 960)],  # First call
+            [(0, 960)],  # Second call (after reset)
+        ]
+        mock_backends["stt_instance"].transcribe.side_effect = ["hello", "hello again"]
+        mock_backends["llm_instance"].complete.side_effect = [
+            type("Completion", (), {"content": "hi", "thinking": ""})(),
+            type("Completion", (), {"content": "hello again", "thinking": ""})(),
+        ]
+        mock_backends["tts_instance"].synthesize.side_effect = [b"wav1", b"wav2"]
+
+        config = PipelineConfig(
+            stt_model="/m.bin",
+            llm_model="/m.gguf",
+            tts_model="/m.onnx",
+        )
+        pipeline = VoicePipeline(config)
+
+        # First call
+        result1 = pipeline.process(b"x" * 960)
+        assert result1 == b"wav1"
+
+        # Reset context
+        pipeline.reset_context()
+
+        # Second call should NOT include context from first call
+        result2 = pipeline.process(b"x" * 960)
+        assert result2 == b"wav2"
+
+        call_args = mock_backends["llm_instance"].complete.call_args_list
+        assert len(call_args) == 2
+
+        # Second call should NOT contain "hello" from first call
+        second_call_arg = call_args[1][0][0]
+        assert "hello again" in second_call_arg
+        assert "hello" not in second_call_arg.replace("hello again", "")
