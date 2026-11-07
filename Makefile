@@ -8,9 +8,10 @@
         format-ruff \
         docs-check code-check test-check lint-check \
         verify-implementation \
-        install-precommit install-voice-input \
+        install-precommit install-voice-install \
         aes-plan aes-build aes-verify aes-review aes-learn \
-        aes-wake aes-sleep
+        aes-wake aes-sleep \
+        doctor-full doctor-quick
 
 # --- Configurable commands ---
 AES_LANGUAGE ?= python
@@ -22,7 +23,7 @@ AES_TEST_INTEGRATION ?= pytest -m "integration" --cov=src/voicevision --cov-repo
 AES_TEST_ALL ?= pytest --cov=src/voicevision --cov-report=term-missing --cov-fail-under=80
 AES_FORMAT ?= ruff format
 AES_BUILD ?= python -m build
-AES_RUN ?= python -m src.main || python src/main.py
+AES_RUN ?= python -m voicevision
 
 export AES_LANGUAGE AES_LINT_RUFF AES_LINT_MYPY AES_TEST_UNIT AES_FORMAT AES_BUILD AES_RUN
 
@@ -35,13 +36,34 @@ install-precommit:
 	@pre-commit install
 	@pre-commit install --hook-type commit-msg
 
-install-voice-input:
+install-voice-install:
 	@echo "Installing voice-input system dependencies (requires sudo)..."
 	@sudo sh "$(CURDIR)/install-voice-input.sh"
+
+# --- Voicevision specific targets ---
+install-deps:
+	@echo "Installing voicevision and development dependencies..."
+	@pip install -e ".[dev]"
+	@pip install sounddevice webrtcvad-wheels
+
+setup-env:
+	@echo "Setting up environment variables..."
+	@if [ ! -f .env ]; then \
+		cp .env.example .env 2>/dev/null || echo "Create .env manually with VOICEVISION_* variables"; \
+	fi
+	@echo "Edit .env and set VOICEVISION_STT_MODEL, VOICEVISION_LLM_MODEL, VOICEVISION_TTS_MODEL"
 
 # --- Run ---
 run:
 	@$(AES_RUN)
+
+run-listen:
+	@echo "Running listen mode (microphone → STT → text)..."
+	@python -m voicevision.listen --seconds 5
+
+run-listen-wake:
+	@echo "Running listen mode with wake word..."
+	@python -m voicevision.listen --seconds 5 --wake-word "Olá Ambrósio"
 
 # --- Test ---
 test: test-unit
@@ -120,6 +142,28 @@ doctor:
 	@echo "=== Optional Deps ==="
 	@python3 -c "deps = ['httpx', 'llama_cpp', 'whisper_cpp', 'faster_whisper', 'piper', 'moondream', 'torch', 'cv2', 'chaquopy']; [print(f'  ✓ {d}') if __import__(d, fromlist=['']) else None for d in deps] if True else None"
 
+doctor-full: doctor
+	@echo ""
+	@echo "=== Full System Check ==="
+	@echo "Checking whisper-cli..."
+	@which whisper-cli > /dev/null 2>&1 && echo "  ✓ whisper-cli: $$(which whisper-cli)" || echo "  ✗ whisper-cli: not found"
+	@echo "Checking whisper model..."
+	@test -f /models/whisper-base.bin && echo "  ✓ whisper-base.bin: /models/whisper-base.bin ($$(du -h /models/whisper-base.bin | cut -f1))" || echo "  ✗ whisper-base.bin: not found in /models/"
+	@echo "Checking Qwen3 model..."
+	@test -f /models/Qwen3-1.7B-Q8_0.gguf && echo "  ✓ Qwen3-1.7B-Q8_0.gguf: /models/Qwen3-1.7B-Q8_0.gguf ($$(du -h /models/Qwen3-1.7B-Q8_0.gguf | cut -f1))" || echo "  ✗ Qwen3-1.7B-Q8_0.gguf: not found in /models/"
+	@echo "Checking moondream models..."
+	@test -f /models/moondream2-text-model-f16.gguf && echo "  ✓ moondream2-text-model-f16.gguf: /models/moondream2-text-model-f16.gguf ($$(du -h /models/moondream2-text-model-f16.gguf | cut -f1))" || echo "  ✗ moondream2-text-model-f16.gguf: not found in /models/"
+	@test -f /models/moondream2-mmproj-f16.gguf && echo "  ✓ moondream2-mmproj-f16.gguf: /models/moondream2-mmproj-f16.gguf ($$(du -h /models/moondream2-mmproj-f16.gguf | cut -f1))" || echo "  ✗ moondream2-mmproj-f16.gguf: not found in /models/"
+	@echo "Checking llama-server..."
+	@which llama-server > /dev/null 2>&1 && echo "  ✓ llama-server: $$(which llama-server)" || echo "  ✗ llama-server: not found"
+	@echo "Checking piper..."
+	@which piper > /dev/null 2>&1 && echo "  ✓ piper: $$(which piper)" || echo "  ✗ piper: not found"
+	@echo "Checking voice.onnx..."
+	@test -f /models/voice.onnx && echo "  ✓ voice.onnx: /models/voice.onnx ($$(du -h /models/voice.onnx | cut -f1))" || echo "  ✗ voice.onnx: not found in /models/"
+	@echo ""
+	@echo "=== Preflight Check ==="
+	@python -m voicevision.preflight
+
 # --- Clean ---
 clean:
 	@rm -rf build dist *.egg-info htmlcov .coverage .pytest_cache .mypy_cache .ruff_cache
@@ -159,9 +203,14 @@ help:
 	@echo "  Setup:"
 	@echo "    make setup              Install deps (uv or pip)"
 	@echo "    make install-precommit  Install git hooks"
+	@echo "    make install-voice-input  Install voice-input system deps (sudo)"
+	@echo "    make install-deps       Install voicevision and dev deps"
+	@echo "    make setup-env          Setup environment variables"
 	@echo ""
 	@echo "  Development:"
 	@echo "    make run                Run main entry point"
+	@echo "    make run-listen         Run listen mode (5 seconds)"
+	@echo "    make run-listen-wake    Run listen mode with wake word"
 	@echo "    make test               Run unit tests (fast)"
 	@echo "    make test-integration   Run integration tests (requires models)"
 	@echo "    make test-all           Run all tests with coverage"
@@ -173,6 +222,10 @@ help:
 	@echo "  Quality Gates:"
 	@echo "    make check              Full AES quality gate (REQUIRED before commit)"
 	@echo "    make verify-implementation  Verify acceptance criteria"
+	@echo ""
+	@echo "  Doctor:"
+	@echo "    make doctor             Quick environment status"
+	@echo "    make doctor-full        Full system check (models, binaries, etc.)"
 	@echo ""
 	@echo "  AES Project Mode:"
 	@echo "    make aes-wake           Load context (start of session)"
