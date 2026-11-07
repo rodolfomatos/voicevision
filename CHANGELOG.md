@@ -62,6 +62,18 @@ All backends are `dummy`-backed by default for testing without hardware/models.
 - `docs/VOICE_INPUT.md` — dictation hotkey setup (editor integration)
 - `README.md` — installation, model acquisition, configuration, worked example
 
+## [0.1.1] - 2026-11-07
+
+### Fixed
+
+- Fixed `test_whisper_cpp.py::TestConstruction::test_available_is_false_without_binary` — now mocks `shutil.which` instead of relying on whisper.cpp being absent
+- Fixed `test_preflight.py::TestExecutableChecks::test_missing_binary_names_the_fix` — now mocks `shutil.which` instead of relying on backends being absent
+
+### Added
+
+- Example of `describe_and_answer()` with real image in README.md
+- Vision (v0.2) section in README.md with camera backends and setup instructions
+
 ## [Unreleased]
 
 ### Planned for v0.2

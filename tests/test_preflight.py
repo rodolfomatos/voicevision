@@ -103,13 +103,14 @@ class TestAudioChecks:
 
 
 class TestExecutableChecks:
-    def test_missing_binary_names_the_fix(self):
+    def test_missing_binary_names_the_fix(self, monkeypatch) -> None:
         from voicevision.preflight import check_executables
+
+        monkeypatch.setattr("voicevision.preflight.shutil.which", lambda _: None)
 
         report = Report()
         check_executables(report)
-        # llama-server / whisper-cli / piper are not on a dev machine, so all
-        # three should be reported with a remedy.
+        # All three backends should be reported with a remedy.
         assert len(report.problems) == 3
         for _, fix in report.problems:
             assert fix

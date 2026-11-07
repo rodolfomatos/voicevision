@@ -177,7 +177,8 @@ class TestConstruction:
     def test_install_hint_names_the_build_step(self) -> None:
         assert "cmake" in WhisperCppBackend.install_hint
 
-    def test_available_is_false_without_binary(self) -> None:
+    def test_available_is_false_without_binary(self, monkeypatch) -> None:
+        monkeypatch.setattr("voicevision.backends.whisper_cpp.shutil.which", lambda _: None)
         assert WhisperCppBackend.available() is False
 
     def test_alternate_binary_is_probed(self, monkeypatch) -> None:

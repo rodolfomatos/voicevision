@@ -43,6 +43,70 @@ network. Audio stays on the local machine.
 See [docs/VOICE_INPUT.md](docs/VOICE_INPUT.md) for the full reference:
 wrapper script, environment variables, troubleshooting, and limitations.
 
+## Vision (v0.2)
+
+voicevision also supports vision: capture an image from a webcam or web page,
+describe it with whisper.cpp/whisper.cpp, generate a response with the LLM, and
+synthesize speech with piper. All models run as subprocesses — nothing is linked
+into this process.
+
+### Camera backends
+
+| Backend | Source | Use case |
+|---------|--------|----------|
+| OpenCV | Local webcam (`/dev/videoN`) | Robotics, embedded devices |
+| Playwright | Web page screenshot | Web content, remote cameras |
+
+### Example: describe and answer
+
+```python
+from voicevision import VoicePipeline, PipelineConfig
+
+config = PipelineConfig(
+    stt_model="/models/whisper-base.bin",
+    stt_language="en",
+    llm_model="/models/qwen3-1.7B.Q4_K_M.gguf",
+    llm_host="127.0.0.1",
+    llm_port=8080,
+    tts_model="/models/voice.onnx",
+    vision_model="/models/moondream2-text-model-f16.gguf",
+)
+
+with VoicePipeline(config) as vp:
+    with open("photo.jpg", "rb") as f:
+        image_data = f.read()
+    audio_out = vp.describe_and_answer(
+        image_data,
+        "What is in this image?",
+    )
+    with open("response.wav", "wb") as f:
+        f.write(audio_out)
+```
+
+### Setup
+
+whisper.cpp and llama.cpp must be built from source:
+
+```bash
+# whisper.cpp (STT)
+git clone https://github.com/ggerganov/whisper.cpp.git
+cd whisper.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target whisper-cli
+
+# llama.cpp (LLM + vision)
+git clone https://github.com/ggerganov/llama.cpp.git
+cd llama.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target whisper-cli llama-server
+
+# Download models
+# whisper-base.bin, whisper-base.en.bin, etc.
+# qwen3-1.7B.Q4_K_M.gguf
+# moondream2-text-model-f16.gguf + moondream2-mmproj-f16.gguf
+# voice.onnx (piper voice)
+```
+
+See `docs/VOICE_INPUT.md` for detailed setup instructions.
+
 ## What it does
 
 The v0.1 voice loop runs end to end in a single call:
