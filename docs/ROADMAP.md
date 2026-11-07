@@ -1,24 +1,26 @@
 # Roadmap
 
-Scope locked at v0.1 = voice loop (VAD → STT → LLM → filter → TTS), Ubuntu/RPi,
+# voicevision Roadmap
+
+Scope: v0.1 = voice loop (VAD → STT → LLM → filter → TTS), Ubuntu/RPi,
 subprocess backends. Vision returns in v0.2 behind unchanged interfaces.
 
 ---
 
-## Sprint 1 — Core foundation *(in progress)*
+## Sprint 1 — Core foundation ✅ Done
 
 | ID | Task | State |
 |----|------|-------|
 | T002 | Protocols + registry + config | **done** |
 | T006 | Unit tests for core | **done** (36 tests, 91% coverage) |
-| T003 | Dummy backends (all modalities) | todo |
-| T005 | CI pipeline | todo |
+| T003 | Dummy backends (all modalities) | **done** |
+| T005 | CI pipeline | **done** |
 
-**Exit criteria:** core is importable, typed, tested, and green in CI.
+**Exit criteria:** core is importable, typed, tested, and green in CI. ✅
 
 ---
 
-## Sprint 2 — Subprocess substrate *(the hard one)*
+## Sprint 2 — Subprocess substrate ✅ Done
 
 | ID | Task | Why it matters |
 |----|------|----------------|
@@ -31,9 +33,12 @@ restart on death (FR-9), and clean `close()`. Naive `subprocess.communicate()`
 deadlocks here as soon as a child fills its stderr pipe — that failure mode is
 the acceptance test.
 
+**Exit criteria:** subprocess lifecycle works correctly, backends can be spawned
+and reaped safely, fake child enables testing without real binaries. ✅
+
 ---
 
-## Sprint 3 — Voice backends
+## Sprint 3 — Voice backends ✅ Done
 
 | ID | Task | External dependency |
 |----|------|---------------------|
@@ -45,29 +50,84 @@ the acceptance test.
 Each ships `available()` and `install_hint` (FR-8). An operator without the
 binary gets an instruction, not a `FileNotFoundError`.
 
+**Exit criteria:** all four backends work with real binaries, dummy backends
+work without any models. ✅
+
 ---
 
-## Sprint 4 — The loop
+## Sprint 4 — The voice loop ✅ Done
 
 | ID | Task | Notes |
 |----|------|-------|
-| T013 | `VoicePipeline.answer()` — FR-1 | Wires VAD → STT → LLM → filter → TTS |
+| T013 | `VoicePipeline.process()` — FR-1 | Wires VAD → STT → LLM → filter → TTS |
 | T014 | Post-LLM filter — FR-5 | Strips qwen3 reasoning traces before TTS |
-| T015 | `SoundDeviceCapture` / `Playback` | PortAudio, Ubuntu only |
+| T015 | SoundDevice capture / playback | PortAudio, Ubuntu only |
 | T016 | `VoiceVision` facade | Fail-fast config validation (FR-19) |
 | T017 | Worked example + README | One end-to-end script |
 
-**Exit criteria:** Definition of Done in `docs/REQUIREMENTS.md` fully ticked.
+**Exit criteria:** Definition of Done in `docs/REQUIREMENTS.md` fully ticked. ✅
 
 ---
 
-## v0.2 — Vision
+## Sprint 5 — Voice enhancements ✅ Done
 
-| ID | Task | Blocked by |
-|----|------|------------|
-| T018 | `MoondreamBackend` (GGUF per ADR-001) | proven voice path |
-| T019 | `CameraBackend` (OpenCV) | a real consumer |
-| T020 | `describe_and_answer()` | T018 + T013 |
+| ID | Task | Notes |
+|----|------|-------|
+| T013 | `VoicePipeline.listen()` — microphone → STT → stdout | VAD segments audio, transcribes via whisper.cpp |
+| T015 | Wake word "Olá Ambrósio" | VAD detects speech, transcribes, checks for wake word |
+| T016 | Pre-roll circular buffer | Captures audio before wake word detection |
+| T017 | Multiple STT models | tiny/base/small/medium/large via `VOICEVISION_STT_MODEL` |
+
+**Exit criteria:** listen mode works with VAD segmentation, wake word detection,
+and pre-roll buffer. ✅
+
+---
+
+## Sprint 6 — Vision v0.2 ✅ Done
+
+| ID | Task | Status |
+|----|------|--------|
+| T014 | Camera backends (OpenCV + Playwright) | **done** |
+| T018 | MoondreamBackend (GGUF per ADR-001) | **done** |
+| T020 | `describe_and_answer()` | **done** |
+
+**Exit criteria:** camera captures frames, vision backends describe images,
+pipeline wires camera → vision → LLM → TTS. ✅
+
+---
+
+## v0.1.0 — Released 🎉
+
+| Date | 2026-11-07 |
+|------|------------|
+| Tag | `v0.1.0` |
+| Commit | See `git log` |
+
+**What was delivered:**
+
+- Voice loop: VAD → STT → LLM → filter → TTS
+- Listen mode: microphone → STT → text
+- Wake word: configurable (default: "Olá Ambrósio")
+- Pre-roll buffer: audio before wake word detection
+- Multiple STT models: tiny/base/small/medium/large
+- Camera backends: OpenCV + Playwright
+- Vision backend: Moondream GGUF via llama.cpp
+- Describe & Answer: image → text → response → speech
+- Preflight utility: `voicevision-preflight`
+- Docker deployment: multi-stage image, docker-compose
+
+See `CHANGELOG.md` for full details.
+
+---
+
+## v0.2 — Planned
+
+| ID | Task | Status |
+|----|------|--------|
+| — | Conversation memory across turns | planned |
+| — | Streaming LLM output to TTS sentence-by-sentence | planned |
+| — | Benchmark suite (TTFT, RTF, RSS) | planned |
+| — | Android/Termux audio adapters | out of scope (separate project) |
 
 ---
 
