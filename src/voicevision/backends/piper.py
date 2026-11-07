@@ -12,7 +12,6 @@ import shutil
 from typing import ClassVar
 
 from voicevision.backends.subprocess_backend import SubprocessBackend
-from voicevision.errors import BackendExecutionError, BackendNotAvailableError
 
 
 class PiperBackend(SubprocessBackend):
@@ -25,8 +24,7 @@ class PiperBackend(SubprocessBackend):
     executable: ClassVar[str] = "piper"
 
     install_hint: ClassVar[str] = (
-        "Install piper: pip install piper-tts, or build from "
-        "https://github.com/rhasspy/piper"
+        "Install piper: pip install piper-tts, or build from https://github.com/rhasspy/piper"
     )
 
     def __init__(
@@ -46,8 +44,10 @@ class PiperBackend(SubprocessBackend):
 
         argv = [
             binary or self.executable,
-            "--model", model,
-            "--output_file", "-",  # write WAV to stdout
+            "--model",
+            model,
+            "--output_file",
+            "-",  # write WAV to stdout
         ]
         if voice:
             argv += ["--voice", voice]

@@ -6,12 +6,13 @@ using unittest.mock to intercept the subprocess calls.
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock, call
+import os
+from unittest.mock import patch
 
 import pytest
 
 from voicevision.backends.piper import PiperBackend
-from voicevision.errors import BackendExecutionError, BackendNotAvailableError
+from voicevision.errors import BackendExecutionError
 
 
 class TestConstruction:
@@ -50,7 +51,11 @@ class TestSynthesis:
 
     def test_returns_wav_bytes(self) -> None:
         """Piper returns WAV bytes for valid input."""
-        with patch.object(PiperBackend, "run", return_value=b"RIFF....WAVEfmt....data....") as mock_run:
+        with patch.object(
+            PiperBackend,
+            "run",
+            return_value=b"RIFF....WAVEfmt....data....",
+        ) as mock_run:
             backend = PiperBackend(model="/models/voice.onnx")
             wav = backend.synthesize("hello")
             assert wav.startswith(b"RIFF")
@@ -74,12 +79,15 @@ class TestSynthesis:
 
     def test_bad_voice_raises_with_stderr(self) -> None:
         """Invalid voice argument surfaces as BackendExecutionError with stderr."""
-        from voicevision.errors import BackendExecutionError
 
         error_stderr = "error: voice 'nonexistent' not found\n"
-        with patch.object(PiperBackend, "run", side_effect=BackendExecutionError(
-            "piper", "piper failed", command="piper ...", returncode=1, stderr=error_stderr
-        )):
+        with patch.object(
+            PiperBackend,
+            "run",
+            side_effect=BackendExecutionError(
+                "piper", "piper failed", command="piper ...", returncode=1, stderr=error_stderr
+            ),
+        ):
             backend = PiperBackend(model="/m.onnx", voice="nonexistent")
             with pytest.raises(BackendExecutionError) as exc:
                 backend.synthesize("x")
@@ -112,8 +120,6 @@ class TestSynthesis:
 
 # -- integration ----------------------------------------------------------
 
-
-import os
 
 @pytest.mark.integration
 @pytest.mark.skipif(

@@ -13,11 +13,12 @@ from voicevision.pipeline import PipelineConfig, VoicePipeline
 @pytest.fixture
 def mock_backends():
     """Mock all backends for pipeline testing."""
-    with patch("voicevision.pipeline.WebrtcVadBackend") as mock_vad, \
-         patch("voicevision.pipeline.WhisperCppBackend") as mock_stt, \
-         patch("voicevision.pipeline.LlamaCppBackend") as mock_llm, \
-         patch("voicevision.pipeline.PiperBackend") as mock_tts:
-
+    with (
+        patch("voicevision.pipeline.WebrtcVadBackend") as mock_vad,
+        patch("voicevision.pipeline.WhisperCppBackend") as mock_stt,
+        patch("voicevision.pipeline.LlamaCppBackend") as mock_llm,
+        patch("voicevision.pipeline.PiperBackend") as mock_tts,
+    ):
         # Setup VAD mock
         vad_instance = MagicMock()
         mock_vad.return_value = vad_instance
@@ -116,7 +117,8 @@ class TestPipelineProcess:
         """Single utterance goes through full pipeline."""
         mock_backends["vad_instance"].segment.return_value = [(0, 960)]
         mock_backends["stt_instance"].transcribe.return_value = "hello"
-        mock_backends["llm_instance"].complete.return_value = type("Completion", (), {"content": "hi there", "thinking": ""})()
+        mock_completion = type("Completion", (), {"content": "hi there", "thinking": ""})()
+        mock_backends["llm_instance"].complete.return_value = mock_completion
         mock_backends["tts_instance"].synthesize.return_value = b"RIFF....WAVE"
 
         config = PipelineConfig(
@@ -280,8 +282,8 @@ class TestPipelineStream:
         # (loop iteration 1, loop iteration 2, final buffer check)
         mock_backends["vad_instance"].segment.side_effect = [
             [(0, 960)],  # First chunk has utterance
-            [],        # Second chunk has none
-            [],        # Final buffer check
+            [],  # Second chunk has none
+            [],  # Final buffer check
         ]
         mock_backends["stt_instance"].transcribe.return_value = "hello"
         mock_backends["llm_instance"].complete.return_value = type(

@@ -6,14 +6,13 @@ No webrtcvad binary needed — tests mock the import and vad.is_speech calls.
 from __future__ import annotations
 
 import builtins
+import os
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-import voicevision.backends.vad as vad_module
 from voicevision.backends.vad import WebrtcVadBackend
-from voicevision.errors import BackendExecutionError, BackendNotAvailableError
 
 
 def make_pcm(frames: int, sample_rate: int = 16000, speech: bool = True) -> bytes:
@@ -23,11 +22,7 @@ def make_pcm(frames: int, sample_rate: int = 16000, speech: bool = True) -> byte
     speech=False: silence (zeros)
     """
     frame_bytes = (16000 * 30 // 1000) * 2  # 960 bytes at 16kHz
-    if speech:
-        # Alternating pattern that triggers speech detection
-        pattern = bytes([i % 256 for i in range(frame_bytes)])
-    else:
-        pattern = bytes(frame_bytes)
+    pattern = bytes([i % 256 for i in range(frame_bytes)]) if speech else bytes(frame_bytes)
     return pattern * frames
 
 
@@ -84,6 +79,7 @@ class TestConstruction:
 
     def test_available_is_false_without_webrtcvad(self) -> None:
         import sys
+
         # Temporarily remove webrtcvad from sys.modules to simulate it not being installed
         webrtcvad_mod = sys.modules.pop("webrtcvad", None)
         try:
@@ -225,8 +221,6 @@ class TestSegmentation:
 # -- integration ----------------------------------------------------------
 
 
-import os
-
 @pytest.mark.integration
 @pytest.mark.skipif(
     not os.environ.get("VOICEVISION_VAD_TEST"),
@@ -235,5 +229,6 @@ import os
 def test_real_vad_segments() -> None:
     """Opt-in test with real webrtcvad."""
     import webrtcvad
+
     assert webrtcvad  # Just verify import works
     # Real test would go here

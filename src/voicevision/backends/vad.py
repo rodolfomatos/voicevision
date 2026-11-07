@@ -6,11 +6,8 @@ Operates on 30 ms frames at 8/16/32/48 kHz.
 
 from __future__ import annotations
 
-import shutil
-from typing import ClassVar, Iterator, Tuple
-
-from voicevision.backends.subprocess_backend import SubprocessBackend
-from voicevision.errors import BackendExecutionError, BackendNotAvailableError
+from collections.abc import Iterator
+from typing import ClassVar
 
 
 class WebrtcVadBackend:
@@ -57,7 +54,7 @@ class WebrtcVadBackend:
             return False
         return True
 
-    def segment(self, pcm: bytes) -> Iterator[Tuple[int, int]]:
+    def segment(self, pcm: bytes) -> Iterator[tuple[int, int]]:
         """Segment PCM16 audio into utterance byte ranges.
 
         Args:
@@ -92,7 +89,7 @@ class WebrtcVadBackend:
 
         for i in range(frame_count):
             start = i * self._frame_bytes
-            frame = pcm[start:start + self._frame_bytes]
+            frame = pcm[start : start + self._frame_bytes]
             is_speech = vad.is_speech(frame, self._sample_rate)
 
             if is_speech:
