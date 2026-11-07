@@ -4,7 +4,7 @@ Moondream is a small vision-language model (~1.9B parameters) that can describe
 and answer questions about images. It runs as a subprocess via llama.cpp
 (ADR-001, ADR-002) — never linked into this process.
 
-The model expects images as base64-encoded data URIs and answers via the
+The model expects images as multipart/form-data uploads and answers via the
 llama.cpp completion endpoint.
 
 All heavy dependencies (llama-cpp-python, pillow) are lazy-imported so
@@ -92,28 +92,16 @@ class MoondreamBackend:
                 "no image data provided",
             )
 
-        # Encode image as base64 data URI for whisper.cpp/llama.cpp
-        import base64  # noqa: PLC0415 - stdlib, lazy for consistency
-
-        b64_image = base64.b64encode(image_data).decode("ascii")
-        image_uri = f"data:image/jpeg;base64,{b64_image}"
-
-        prompt_text = prompt or "Describe this image in detail."
-
         import httpx  # noqa: PLC0415 - lazy import per CLAUDE.md
 
-        payload = {
-            "prompt": f"{image_uri}\n\n{prompt_text}",
-            "temperature": 0.7,
-            "n_predict": 512,
-            "stream": False,
-        }
+        prompt_text = prompt or "Describe this image in detail."
 
         try:
             with httpx.Client(timeout=60.0) as client:
                 response = client.post(
                     f"http://{self._host}:{self._port}/completion",
-                    json=payload,
+                    files={"file": ("image.jpg", image_data, "image/jpeg")},
+                    data={"prompt": prompt_text},
                 )
                 response.raise_for_status()
                 data = response.json()

@@ -18,3 +18,4 @@ htmlcov/
 # AES
 aes/shadow/access.log
 aes/metrics/
+llama-server

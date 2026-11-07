@@ -65,3 +65,24 @@ Remove vision backend file and describe_and_answer method; revert pipeline.
 - VisionBackend and CameraBackend are Protocols in core/protocols.py
 - core/config.py already has vision_backend, vision_model fields
 - core/registry.py already registers "vision" modality
+
+## Test Results — Real Models
+
+✅ Tested successfully on 2026-11-07:
+
+- Downloaded moondream2-mmproj-f16.gguf (910 MB) and moondream2-text-model-f16.gguf (2.8 GB)
+- Built llama-server from https://github.com/ggerganov/llama.cpp
+- Started llama-server with moondream model on port 8081
+- Tested describe_and_answer() end-to-end with real image + question
+- Result: "A painting of a beautiful landscape with mountains, trees, and a lake.\n4. A sculpture of a human figure."
+
+### Test Environment
+
+- Machine: rodolfo@ilab:/opt/voicevision
+- OS: Linux (Ubuntu)
+- whisper-cli: /usr/local/bin/whisper-cli
+- whisper model: /models/whisper-base.bin (142 MB)
+- moondream model: /models/moondream2-text-model-f16.gguf (2.8 GB)
+- moondream mmproj: /models/moondream2-mmproj-f16.gguf (910 MB)
+- llama-server: /opt/voicevision/llama-server (built from source)
+- Server URL: http://127.0.0.1:8081/completion

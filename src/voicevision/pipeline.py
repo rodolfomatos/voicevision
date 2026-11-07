@@ -233,23 +233,27 @@ class VoicePipeline:
             return b""
 
         # 2. LLM: generate a spoken response to the question based on the description
-        prompt = (
-            f"Based on this image description: '{description}'\n\n"
-            f"Question: {question}\n\n"
-            f"Answer concisely in a way suitable for text-to-speech:"
-        )
-        completion = self.llm.complete(prompt)
-        response_text = completion.content
+        if self._llm is not None:
+            prompt = (
+                f"Based on this image description: '{description}'\n\n"
+                f"Question: {question}\n\n"
+                f"Answer concisely in a way suitable for text-to-speech:"
+            )
+            completion = self.llm.complete(prompt)
+            response_text = completion.content
 
-        # 3. Filter: strip thinking traces if enabled
-        if self.config.enable_thinking_filter:
-            response_text = self._filter_thinking(response_text)
+            # 3. Filter: strip thinking traces if enabled
+            if self.config.enable_thinking_filter:
+                response_text = self._filter_thinking(response_text)
 
-        if not response_text.strip():
-            return b""
+            if not response_text.strip():
+                return b""
 
-        # 4. TTS: synthesize the response
-        return self.tts.synthesize(response_text)
+            # 4. TTS: synthesize the response
+            return self.tts.synthesize(response_text)
+
+        # 2b. No LLM configured: return description as text (no TTS)
+        return description.encode("utf-8")
 
     def _filter_thinking(self, text: str) -> str:
         """Strip qwen3 reasoning traces from LLM output.
