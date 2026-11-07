@@ -6,6 +6,7 @@ are needed: everything is mocked or replaced with the fake child.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from types import ModuleType
@@ -356,6 +357,120 @@ class TestRun:
         mock_vad.assert_not_called()
         out = capsys.readouterr().out.strip()
         assert out == "ola mundo"
+
+
+class TestListenModeJson:
+    def test_json_output_prints_json(self, monkeypatch: Any, capsys: Any) -> None:
+        """--json flag prints JSON with transcript, timestamp, language."""
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    json_output=True,
+                )
+            )
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        data = json.loads(out)
+        assert data["transcript"] == "ola mundo"
+        assert "timestamp" in data
+        assert data["language"] == "en"
+        assert "audio_duration_seconds" in data
+        assert "transcription_ms" in data
+
+    def test_json_output_includes_pcm_duration(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """--json includes audio_duration_seconds when --seconds is used."""
+        with (
+            patch(
+                "voicevision.listen._capture_fixed_seconds",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    fixed_seconds=2.0,
+                    json_output=True,
+                )
+            )
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        data = json.loads(out)
+        assert data["transcript"] == "ola mundo"
+        # 960 bytes at 16kHz mono PCM16 = 960 / (16000 * 2) = 0.03 seconds
+        assert data["audio_duration_seconds"] == 960 / (16000 * 2)
+
+    def test_json_output_includes_wake_word_detected(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """--json with --wake-word includes wake_word_detected and wake_word."""
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
+        fake_vad = FakeVadBackend(utterances=[[(0, FRAME_BYTES)]])
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="olá ambrósio, como está você?",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    max_record_seconds=5.0,
+                    json_output=True,
+                )
+            )
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        data = json.loads(out)
+        assert data["transcript"] == "como esta voce"  # wake word stripped (normalized)
+        assert data["wake_word_detected"] is True
+        assert data["wake_word"] == "olá ambrósio"
+
+    def test_plain_text_when_no_json_flag(self, capsys: Any) -> None:
+        """Without --json flag, plain text is printed."""
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(ListenConfig(stt_model="/models/whisper-base.bin"))
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        assert out == "ola mundo"
+        # Should not be valid JSON
+        import json
+
+        try:
+            json.loads(out)
+            raise AssertionError("Should not be valid JSON")
+        except json.JSONDecodeError:
+            pass
 
 
 # -- wake word ---------------------------------------------------------------

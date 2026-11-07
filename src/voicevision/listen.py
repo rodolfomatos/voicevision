@@ -17,6 +17,7 @@ install hint only when capture is actually attempted.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -129,6 +130,7 @@ class ListenConfig:
     fixed_seconds: float = 0.0
     wake_word: str = ""
     pre_roll_seconds: float = 0.0
+    json_output: bool = False
 
 
 def _env_int(name: str, default: int) -> int:
@@ -317,6 +319,40 @@ def _transcribe_pcm(pcm: bytes, config: ListenConfig) -> str:
     return stt.transcribe(wav)
 
 
+def _format_output(
+    transcript: str,
+    config: ListenConfig,
+    *,
+    pcm_duration_seconds: float | None = None,
+    transcription_ms: float | None = None,
+    wake_word_detected: bool | None = None,
+) -> str:
+    """Format output as plain text or JSON depending on config."""
+    if not config.json_output:
+        return transcript
+
+    import time as _time
+
+    result: dict[str, object] = {
+        "transcript": transcript,
+        "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "language": config.stt_language,
+    }
+
+    if pcm_duration_seconds is not None:
+        result["audio_duration_seconds"] = pcm_duration_seconds
+
+    if transcription_ms is not None:
+        result["transcription_ms"] = transcription_ms
+
+    if wake_word_detected is not None:
+        result["wake_word_detected"] = wake_word_detected
+        if config.wake_word:
+            result["wake_word"] = config.wake_word
+
+    return json.dumps(result, ensure_ascii=False)
+
+
 def run(config: ListenConfig | None = None) -> int:
     """Run listen mode: capture, transcribe, print transcript to stdout.
 
@@ -354,6 +390,8 @@ def run(config: ListenConfig | None = None) -> int:
         print("no speech detected", file=sys.stderr)
         return 0
 
+    pcm_duration_seconds = len(pcm) / (DEFAULT_SAMPLE_RATE * 2)
+    start_time = time.monotonic()
     try:
         transcript = _transcribe_pcm(pcm, config)
     except BackendNotAvailableError as exc:
@@ -363,9 +401,17 @@ def run(config: ListenConfig | None = None) -> int:
     except BackendExecutionError as exc:
         print(f"error: transcription failed: {exc}", file=sys.stderr)
         return 2
+    transcription_ms = (time.monotonic() - start_time) * 1000
 
     if transcript:
-        print(transcript)
+        print(
+            _format_output(
+                transcript,
+                config,
+                pcm_duration_seconds=pcm_duration_seconds,
+                transcription_ms=transcription_ms,
+            )
+        )
     else:
         print("no speech detected", file=sys.stderr)
 
@@ -424,7 +470,18 @@ def _run_wake_word(config: ListenConfig) -> int:
                     pcm[:usable], utterances, config, _pre_roll_bytes(config.pre_roll_seconds)
                 )
                 if result is not None:
-                    print(result)
+                    transcript_result, transcription_ms = result
+                    assert transcript_result is not None
+                    pcm_duration_seconds = len(pcm[:usable]) / (DEFAULT_SAMPLE_RATE * 2)
+                    print(
+                        _format_output(
+                            transcript_result,
+                            config,
+                            pcm_duration_seconds=pcm_duration_seconds,
+                            transcription_ms=transcription_ms,
+                            wake_word_detected=True,
+                        )
+                    )
                     return 0
 
     except ListenError as exc:
@@ -441,16 +498,18 @@ def _transcribe_utterances(
     utterances: list[tuple[int, int]],
     config: ListenConfig,
     pre_roll_bytes: int = 0,
-) -> str | None:
+) -> tuple[str | None, float | None]:
     """Transcribe each utterance and check for the wake word.
 
     When *pre_roll_bytes* > 0, the audio immediately preceding each utterance
     (up to *pre_roll_bytes*) is prepended so the wake word's lead-in is not
     lost to VAD segmentation.
 
-    Returns the transcript remainder (wake word stripped) if the wake word is
-    detected in any utterance, or None if none matched.
+    Returns the transcript remainder (wake word stripped) and transcription
+    time in ms if the wake word is detected in any utterance, or (None, None)
+    if none matched.
     """
+    start_time = time.monotonic()
     for start, end in utterances:
         pre_roll_start = max(0, start - pre_roll_bytes)
         utterance_pcm = pcm[pre_roll_start:end]
@@ -469,9 +528,10 @@ def _transcribe_utterances(
 
         if _wake_word_detected(transcript, config.wake_word):
             remainder = _strip_wake_word(transcript, config.wake_word)
-            return remainder if remainder else "wake word detected"
+            transcription_ms = (time.monotonic() - start_time) * 1000
+            return remainder if remainder else "wake word detected", transcription_ms
 
-    return None
+    return None, None
 
 
 def _strip_wake_word(transcript: str, wake_word: str) -> str:
@@ -524,6 +584,12 @@ def main() -> None:
         help="Seconds of audio to prepend before each utterance when wake "
         "word mode is active (e.g. --pre-roll-seconds 2). Default: 0.",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Output transcript as JSON instead of plain text",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -536,6 +602,8 @@ def main() -> None:
         config = replace(config, wake_word=args.wake_word)
     if args.pre_roll_seconds > 0:
         config = replace(config, pre_roll_seconds=args.pre_roll_seconds)
+    if args.json:
+        config = replace(config, json_output=True)
 
     sys.exit(run(config))
 
