@@ -90,9 +90,19 @@ and pre-roll buffer. ✅
 | T014 | Camera backends (OpenCV + Playwright) | **done** |
 | T018 | MoondreamBackend (GGUF per ADR-001) | **done** |
 | T020 | `describe_and_answer()` | **done** |
+| T024 | Streaming LLM → TTS | **done** |
 
 **Exit criteria:** camera captures frames, vision backends describe images,
-pipeline wires camera → vision → LLM → TTS. ✅
+pipeline wires camera → vision → LLM → TTS. Streaming LLM → TTS reduces
+perceived latency. ✅
+
+---
+
+## v0.2.0 — Released 🎉
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 0.2.0 | 2026-11-07 | Vision backends (OpenCV + Playwright), MoondreamBackend, describe_and_answer() pipeline, conversation memory, streaming LLM → TTS |
 
 ---
 
