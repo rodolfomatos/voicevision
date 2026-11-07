@@ -9,432 +9,211 @@ multimodal AI on the edge. It is a library, not an application: the caller owns
 context, models, and audio devices. Everything runs locally, with no cloud API,
 no HTTP/gRPC surface of our own, and no model runtime linked into this process.
 
-## How we use it — Linux Mint + OpenCode
+---
 
-This is the setup that motivated `voicevision`: speaking into OpenCode instead
-of typing, on a Linux Mint (Cinnamon) desktop.
+# 🚀 Quick Start
 
-1. **Install everything** (one command, needs `sudo`):
-
-   ```bash
-   make install-voice-input
-   source ~/.bashrc
-   ```
-
-2. **Configure the global hotkey** in Cinnamon:
-   *Menu → Preferences → Keyboard → Shortcuts → Custom Shortcuts → +*
-
-   | Field | Value |
-   |-------|-------|
-   | Name | `Voice → Text (OpenCode)` |
-   | Command | `/home/rodolfo/.local/bin/voicevision-listen-and-copy` |
-   | Shortcut | `F9` (or any key that does not conflict) |
-
-3. **Daily flow:**
-   * Focus the OpenCode chat input.
-   * Press `F9`, speak clearly for a few seconds.
-   * A desktop notification shows the transcript; the text is in your clipboard.
-   * Press `ctrl+v` in the OpenCode input to paste, review, then `Enter` to send.
-
-The wrapper records until ~2 seconds of silence (VAD), transcribes via
-whisper.cpp, and copies the result to the clipboard — no LLM, no TTS, no
-network. Audio stays on the local machine.
-
-See [docs/VOICE_INPUT.md](docs/VOICE_INPUT.md) for the full reference:
-wrapper script, environment variables, troubleshooting, and limitations.
-
-## Vision (v0.2)
-
-voicevision also supports vision: capture an image from a webcam or web page,
-describe it with whisper.cpp/whisper.cpp, generate a response with the LLM, and
-synthesize speech with piper. All models run as subprocesses — nothing is linked
-into this process.
-
-### Camera backends
-
-| Backend | Source | Use case |
-|---------|--------|----------|
-| OpenCV | Local webcam (`/dev/videoN`) | Robotics, embedded devices |
-| Playwright | Web page screenshot | Web content, remote cameras |
-
-### Example: describe and answer
-
-```python
-from voicevision import VoicePipeline, PipelineConfig
-
-config = PipelineConfig(
-    stt_model="/models/whisper-base.bin",
-    stt_language="en",
-    llm_model="/models/qwen3-1.7B.Q4_K_M.gguf",
-    llm_host="127.0.0.1",
-    llm_port=8080,
-    tts_model="/models/voice.onnx",
-    vision_model="/models/moondream2-text-model-f16.gguf",
-)
-
-with VoicePipeline(config) as vp:
-    with open("photo.jpg", "rb") as f:
-        image_data = f.read()
-    audio_out = vp.describe_and_answer(
-        image_data,
-        "What is in this image?",
-    )
-    with open("response.wav", "wb") as f:
-        f.write(audio_out)
-```
-
-### Setup
-
-whisper.cpp and llama.cpp must be built from source:
+## 1. Clone and install
 
 ```bash
-# whisper.cpp (STT)
-git clone https://github.com/ggerganov/whisper.cpp.git
-cd whisper.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target whisper-cli
-
-# llama.cpp (LLM + vision)
-git clone https://github.com/ggerganov/llama.cpp.git
-cd llama.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target whisper-cli llama-server
-
-# Download models
-# whisper-base.bin, whisper-base.en.bin, etc.
-# qwen3-1.7B.Q4_K_M.gguf
-# moondream2-text-model-f16.gguf + moondream2-mmproj-f16.gguf
-# voice.onnx (piper voice)
-```
-
-See `docs/VOICE_INPUT.md` for detailed setup instructions.
-
-## What it does
-
-The v0.1 voice loop runs end to end in a single call:
-
-```
-PCM16 audio in  →  VAD (webrtcvad)  →  STT (whisper.cpp)  →
-LLM (qwen3:1.7B via llama-server)  →  output filter  →  TTS (piper)  →  WAV out
-```
-
-A lighter **listen mode** is also available: microphone → STT → text on stdout,
-with no LLM and no TTS. Use it with an editor hotkey to speak instead of type
-(see [Voice Input](docs/VOICE_INPUT.md)).
-
-## Design decisions (read before changing anything)
-
-Two ADRs govern this project. Read them before touching backends, config, or
-the pipeline:
-
-| ADR | What it decides |
-|-----|-----------------|
-| `docs/ADR-001-backends-llamacpp.md` | llama.cpp / GGUF is the single inference runtime for LLM + vision; whisper.cpp for STT; piper (onnxruntime) for TTS. No torch, no transformers. |
-| `docs/ADR-002-subprocess-backends.md` | Every model backend runs as a separate OS process. The LLM is a resident `llama-server` daemon over localhost HTTP; whisper.cpp and piper are one-shot children. |
-
-Key consequences:
-
-- **Crash isolation:** a segfaulting model kills one child process, not the caller.
-- **Model memory is separate:** core RSS stays under 50 MB; models are counted in their own processes.
-- **No `torch`, no `transformers`, no `cv2` at module scope** — heavy optional deps are lazy-imported only when used.
-- **Never `shell=True`** — bandit enforces this; argv lists only.
-- **Never hardcode a model path** — config or environment only (`VOICEVISION_*` prefix).
-- **Models are never downloaded by this package** — operators supply paths.
-
-## Requirements
-
-| | |
-|---|---|
-| Language | Python 3.10+ |
-| Target platform | Ubuntu 22.04+; Raspberry Pi OS (Ubuntu-aarch64) |
-| Core runtime deps | `pydantic>=2.7`, `pydantic-settings>=2.3`, `typing-extensions>=4.10` |
-| Optional runtime deps | `webrtcvad-wheels` (VAD), `sounddevice>=0.4.6` (audio capture) |
-| External binaries (operator-installed) | `whisper.cpp` CLI, `llama-server`, `piper` |
-| Model files | Operator-supplied; paths via `VOICEVISION_*` env vars |
-| Network | None required at runtime — fully offline |
-
-## Install
-
-### 1. Install the library
-
-```bash
-# From a checkout of this repo
-pip install -e ".[dev]"
-
-# Or, once published:
-pip install voicevision
-```
-
-The `dev` extra includes `pytest`, `ruff`, `mypy`, `bandit`, `pre-commit` for
-quality gates.
-
-### 2. Install the model backends (operator responsibility)
-
-`voicevision` never downloads models or binaries. You must install these
-yourself and point the library at them via environment variables:
-
-| Binary | Purpose | Build / install |
-|--------|---------|-----------------|
-| `whisper-cli` | STT (whisper.cpp) | `git clone https://github.com/ggerganov/whisper.cpp && cmake --build build --target whisper-cli` |
-| `llama-server` | LLM daemon (llama.cpp) | `cmake --build build --target llama-server` |
-| `piper` | TTS | `pip install piper-tts` or build from https://github.com/rhasspy/piper |
-
-Verify they are on `PATH`:
-
-```bash
-which whisper-cli llama-server piper
-```
-
-### 3. Obtain model files
-
-Models are **mounted volumes, not baked into the image** (ADR-003). Place them
-anywhere and reference them by env var. Example layout:
-
-```
-/models/
-  ├── whisper-base.bin          # STT (~142 MB)
-  ├── qwen3-1.7B.Q4_K_M.gguf    # LLM (~900 MB)
-  └── voice.onnx                # TTS voice (piper)
-```
-
-Suggested sources:
-
-- **whisper.cpp models:** https://github.com/ggerganov/whisper.cpp
-  (`ggml-base.bin`, `ggml-small.bin`, etc.)
-- **qwen3 GGUF:** https://huggingface.co/Qwen/Qwen3-1.7B-GGUF
-- **piper voices:** https://github.com/rhasspy/piper#downloads
-
-### 4. Optional: listen mode (voice input without LLM/TTS)
-
-The `voicevision-listen` CLI records from the microphone, transcribes via
-whisper.cpp, and prints text to stdout — no LLM, no TTS, no network. It needs
-the `sounddevice` extra:
-
-```bash
+git clone https://github.com/rodolfomatos/voicevision.git
+cd voicevision
 pip install -e ".[dev]"
 ```
 
-Then set `VOICEVISION_STT_MODEL` (see Configuration below) and run:
+## 2. Install system dependencies (requires sudo)
 
 ```bash
-voicevision-listen
-# records until ~2 s of silence, then prints the transcript
+make install-voice-input
 ```
 
-For editor integration (OpenCode hotkey, etc.), see
-[docs/VOICE_INPUT.md](docs/VOICE_INPUT.md), which includes a shell wrapper that
-copies the transcript to the clipboard and a Cinnamon global-hotkey recipe.
+This installs: `xclip`, `cmake`, `build-essential`, `git`, `curl`, `python3-pip`,
+`whisper.cpp` CLI, `llama-server`, `piper`, and the `voicevision-listen-and-copy`
+wrapper script.
 
-## Quick start — worked example
+## 3. Download models
 
-### Step 0: preflight (validate the environment before anything is attempted)
+Models are **not included** — you must download them yourself:
 
 ```bash
-export VOICEVISION_LLM_MODEL=/models/qwen3-1.7B.Q4_K_M.gguf
-export VOICEVISION_STT_MODEL=/models/whisper-base.bin
-export VOICEVISION_TTS_MODEL=/models/voice.onnx
+# whisper.cpp STT model (~142 MB)
+curl -L -o /models/whisper-base.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
 
-python -m voicevision.preflight
+# LLM model (Qwen3 1.7B, ~1.7 GB)
+curl -L -o /models/Qwen3-1.7B-Q8_0.gguf \
+  https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q8_0.gguf
+
+# piper TTS voice model (~2 MB)
+curl -L -o /models/voice.onnx \
+  https://huggingface.co/rhasspy/piper-voices/raw/master/en/en_US/kokoro/x_low/en_US-kokoro-x_low.onnx
+
+# moondream vision model (2.8 GB text model)
+curl -L -o /models/moondream2-text-model-f16.gguf \
+  https://huggingface.co/moondream/moondream2-gguf/resolve/main/moondream2-text-model-f16.gguf
+
+# moondream vision projection model (910 MB)
+curl -L -o /models/moondream2-mmproj-f16.gguf \
+  https://huggingface.co/moondream/moondream2-gguf/resolve/main/moondream2-mmproj-f16.gguf
 ```
 
-Expected output:
+## 4. Configure environment variables
 
-```
-voicevision preflight
-============================================================
-  OK    llama-server (llamacpp backend) at /usr/local/bin/llama-server
-  OK    whisper-cli (whispercpp backend) at /usr/local/bin/whisper-cli
-  OK    piper (piper backend) at /usr/local/bin/piper
-  OK    llm model qwen3-1.7B.Q4_K_M.gguf (900 MB)
-  OK    stt model whisper-base.bin (142 MB)
-  OK    tts model voice.onnx (45 MB)
-  OK    webrtcvad importable (vad)
-  OK    sounddevice importable (audio capture)
-============================================================
-All checks passed.
-```
-
-Any `FAIL` line names the fix explicitly. Do not proceed past a failed preflight.
-
-### Step 1: run the voice loop end to end
-
-```python
-from voicevision import VoicePipeline, PipelineConfig
-
-config = PipelineConfig(
-    # VAD
-    vad_aggressiveness=2,
-    vad_silence_ms=500,
-    vad_max_utterance_ms=30_000,
-
-    # STT
-    stt_model="/models/whisper-base.bin",
-    stt_language="en",
-
-    # LLM
-    llm_model="/models/qwen3-1.7B.Q4_K_M.gguf",
-    llm_host="127.0.0.1",
-    llm_port=8080,
-    llm_context_size=2048,
-    llm_gpu_layers=0,
-    llm_threads=4,
-
-    # TTS
-    tts_model="/models/voice.onnx",
-    tts_voice="",
-    tts_length_scale=1.0,
-)
-
-with VoicePipeline(config) as vp:
-    audio_in = open("question.wav", "rb").read()   # 16 kHz mono PCM16
-    audio_out = vp.process(audio_in)                # bytes: synthesized speech
-    open("answer.wav", "wb").write(audio_out)
-```
-
-`process(audio_bytes)` accepts raw PCM16 mono at 16 kHz and returns synthesized
-speech as WAV bytes. Empty input returns empty bytes; an utterance with no
-transcript is skipped (no wasted LLM inference on a cough).
-
-### Step 2: stage-by-stage (override what you need)
-
-Each stage of the pipeline is individually addressable:
-
-```python
-from voicevision import VoicePipeline, PipelineConfig
-
-config = PipelineConfig(
-    stt_model="/models/whisper-base.bin",
-    llm_model="/models/qwen3-1.7B.Q4_K_M.gguf",
-    tts_model="/models/voice.onnx",
-)
-vp = VoicePipeline(config)
-
-# STT only
-transcript = vp.stt.transcribe(audio_bytes)
-
-# LLM only (resident daemon, starts on first call)
-completion = vp.llm.complete("What is the capital of Portugal?")
-print(completion.content)        # answer text
-print(completion.thinking)       # reasoning trace, if any (qwen3)
-
-# TTS only
-wav = vp.tts.synthesize("Lisboa.")
-
-vp.close()
-```
-
-### Step 3: listen mode (speak instead of type)
+Create a `.env` file:
 
 ```bash
-export VOICEVISION_STT_MODEL=/models/whisper-base.bin
-voicevision-listen
-# speaks until ~2 s of silence, then prints transcript to stdout
+VOICEVISION_STT_MODEL=/models/whisper-base.bin
+VOICEVISION_LLM_MODEL=/models/Qwen3-1.7B.Q8_0.gguf
+VOICEVISION_TTS_MODEL=/models/voice.onnx
+VOICEVISION_VISION_MODEL=/models/moondream2-text-model-f16.gguf
+VOICEVISION_STT_LANGUAGE=pt
 ```
 
-Or with a fixed recording duration:
+Then `source .env` or add to your `~/.bashrc`.
+
+## 5. Start llama-server (for LLM + vision)
 
 ```bash
-voicevision-listen --seconds 5
+/opt/voicevision/llama-server -m /models/Qwen3-1.7B-Q8_0.gguf --port 8080 -c 2048
 ```
 
-See [docs/VOICE_INPUT.md](docs/VOICE_INPUT.md) for a clipboard-copy wrapper and
-a Cinnamon global-hotkey setup so you can speak into OpenCode instead of typing.
-
-## Configuration
-
-All configuration uses pydantic-settings with the `VOICEVISION_` env prefix.
-Every field has a default; nothing is required until you construct the facade.
-
-| Env var | Default | Meaning |
-|---------|---------|---------|
-| `VOICEVISION_LLM_BACKEND` | `dummy` | LLM backend name (`llamacpp`, `ollama`, `dummy`) |
-| `VOICEVISION_LLM_MODEL` | `""` | Model path (GGUF) — required for real runs |
-| `VOICEVISION_STT_BACKEND` | `dummy` | STT backend name (`whispercpp`, `dummy`) |
-| `VOICEVISION_STT_MODEL` | `""` | Model path (`.bin`) — required for real runs |
-| `VOICEVISION_STT_LANGUAGE` | `en` | Transcription language |
-| `VOICEVISION_TTS_BACKEND` | `dummy` | TTS backend name (`piper`, `dummy`) |
-| `VOICEVISION_TTS_MODEL` | `""` | Model path (`.onnx`) |
-| `VOICEVISION_VISION_BACKEND` | `dummy` | Vision backend name (v0.2) |
-| `VOICEVISION_VISION_MODEL` | `""` | Vision model path (v0.2) |
-| `VOICEVISION_CAMERA_BACKEND` | `dummy` | Camera backend name (v0.2) |
-| `VOICEVISION_CAMERA_INDEX` | `0` | Camera device index |
-| `VOICEVISION_CAMERA_RESOLUTION` | `640x480` | Capture resolution |
-| `VOICEVISION_VAD_AGGRESSIVENESS` | `2` | WebRTC VAD 0–3 |
-| `VOICEVISION_VAD_SILENCE_MS` | `500` | Silence to close an utterance |
-| `VOICEVISION_VAD_MAX_UTTERANCE_MS` | `30000` | Runaway protection |
-| `VOICEVISION_MAX_RECORD_SECONDS` | `60` | Listen-mode max recording |
-
-### Dummy backends (no models required)
-
-Every modality has a `Dummy` backend, so the entire loop is unit-testable on a
-machine with no GPU, no models, and no microphone:
-
-```python
-from voicevision import VoicePipeline, PipelineConfig
-
-config = PipelineConfig(  # all dummy
-    llm_backend="dummy", stt_backend="dummy",
-    tts_backend="dummy", vision_backend="dummy", camera_backend="dummy",
-)
-with VoicePipeline(config) as vp:
-    out = vp.process(b"\x00" * 16000 * 2)  # 1 s of silence
+In another terminal, start whisper.cpp server if needed:
+```bash
+/opt/voicevision/whisper-server -m /models/whisper-base.bin --port 8082
 ```
 
-## Project structure
+---
+
+# 🎤 Voice Input (listen mode)
+
+The `voicevision-listen` command captures audio from your microphone,
+transcribes it via whisper.cpp, and prints the text to stdout.
+
+## Basic usage
+
+```bash
+# Record for 5 seconds, transcribe, print text
+python -m voicevision.listen --seconds 5
+
+# With wake word detection (default 5 second timeout)
+VOICEVISION_STT_MODEL=/models/whisper-base.bin \
+voicevision-listen --wake-word "Olá Ambrósio"
+```
+
+## With clipboard (for OpenCode / any editor)
+
+```bash
+voicevision-listen-and-copy
+```
+
+This records 5 seconds, transcribes, and copies the result to your clipboard.
+Then paste with `Ctrl+V` into any application.
+
+## Keybind setup (Cinnamon desktop)
+
+System Settings → Keyboard → Shortcuts → Custom Shortcuts → +
+
+| Field | Value |
+|-------|-------|
+| Name | Voice → Text |
+| Command | `~/.local/bin/voicevision-listen-and-copy` |
+| Shortcut | `F9` (or your choice) |
+
+See `docs/VOICE_INPUT.md` for full documentation.
+
+---
+
+# 📦 Project Documentation
+
+| File | Description |
+|------|-------------|
+| `docs/VISION.md` | Problem, solution, value proposition |
+| `docs/REQUIREMENTS.md` | Functional + non-functional requirements |
+| `docs/ROADMAP.md` | Sprints, backlog, Definition of Done |
+| `docs/ADR-001-backends-llamacpp.md` | llama.cpp / GGUF single runtime decision |
+| `docs/ADR-002-subprocess-backends.md` | Subprocess backend decision |
+| `docs/ADR-003-container-deployment.md` | Containerized deployment decision |
+| `docs/QUALITY_GATES.md` | Quality gate configuration |
+| `docs/CHECKLIST.md` | Pre-commit / pre-release checklist |
+| `docs/HOSTILE_INSIGHTS.md` | Lessons from hostile analysis |
+| `docs/VOICE_INPUT.md` | Dictation hotkey setup (editor integration) |
+
+---
+
+# 🏗️ Project Structure
 
 ```
 voicevision/
 ├── src/voicevision/
-│   ├── __init__.py          # Public API: VoicePipeline, PipelineConfig, VoiceVisionConfig, protocols, errors
+│   ├── __init__.py          # Public API
 │   ├── core/
-│   │   ├── config.py        # VoiceVisionConfig (pydantic-settings, VOICEVISION_* prefix)
-│   │   ├── protocols.py     # LLMBackend, STTBackend, TTSBackend, VisionBackend, CameraBackend
-│   │   └── registry.py      # BackendRegistry — register / get / list / create by (modality, name)
+│   │   ├── config.py        # VoiceVisionConfig (env vars)
+│   │   ├── protocols.py     # Protocol interfaces
+│   │   ├── registry.py      # Backend registry
+│   │   └── __init__.py
 │   ├── backends/
 │   │   ├── __init__.py
-│   │   ├── subprocess_backend.py   # One-shot child process base (whisper.cpp, piper)
-│   │   ├── resident.py             # Long-lived daemon base (llama-server)
-│   │   ├── whisper_cpp.py          # STT via whisper.cpp CLI (T009)
-│   │   ├── llama_cpp.py            # LLM via supervised llama-server (T010)
-│   │   ├── piper.py                # TTS via piper CLI (T011)
-│   │   ├── vad.py                  # VAD via webrtcvad (T012)
-│   │   └── dummy.py                # Dummy backends for every modality
-│   ├── listen.py               # Listen-only mode: mic → VAD → STT → stdout (T013)
-│   ├── pipeline.py             # VoicePipeline: VAD → STT → LLM → filter → TTS (T013)
-│   ├── preflight.py            # Deployment diagnostics: why is this not working right now
-│   ├── audio.py                # WAV helpers: 16 kHz mono PCM16 contract
-│   └── errors.py               # VoiceVisionError, BackendNotAvailableError, BackendExecutionError, ConfigurationError
-├── tests/                      # Unit tests; every backend has Dummy siblings
-├── pyproject.toml              # Package config, entry points, quality-gate settings
-├── Makefile                    # make check, test, lint, format, doctor, install-voice-input
-├── install-voice-input.sh      # One-command system install (sudo): backends, models, Python package
-├── scripts/voicevision-listen-and-copy.sh   # Clipboard-copy wrapper for editor hotkeys
+│   │   ├── subprocess_backend.py   # Subprocess base class
+│   │   ├── resident.py            # Daemon backend base
+│   │   ├── whisper_cpp.py         # STT via whisper.cpp CLI
+│   │   ├── llama_cpp.py           # LLM via llama-server
+│   │   ├── piper.py               # TTS via piper CLI
+│   │   ├── vad.py                 # VAD via webrtcvad
+│   │   ├── vision.py              # Vision via whisper.cpp/llama.cpp
+│   │   └── dummy.py               # Dummy backends for testing
+│   ├── listen.py                # Listen-only mode
+│   ├── pipeline.py              # VoicePipeline: audio → audio
+│   ├── preflight.py             # Deployment diagnostics
+│   ├── audio.py                 # WAV helpers
+│   └── errors.py                # Error classes
+├── tests/
+│   ├── test_*.py                # Unit tests
+│   ├── conftest.py              # Pytest fixtures
+│   └── support/                 # Test support modules
 ├── docs/
-│   ├── VISION.md               # Problem, solution, value proposition
-│   ├── REQUIREMENTS.md         # Functional + non-functional requirements (FR-1..FR-20, NFR-1..NFR-10)
-│   ├── ROADMAP.md              # Sprints, backlog, Definition of Done
-│   ├── ADR-001-backends-llamacpp.md   # llama.cpp / GGUF single runtime
-│   ├── ADR-002-subprocess-backends.md # Every backend is a subprocess
-│   ├── ADR-003-container-deployment.md # Models as volume, tini as PID 1, /dev/snd pass-through
-│   ├── DESIGN.md               # Visual system (UI projects — N/A for this library)
-│   ├── PERSONAS.md             # Who uses this
-│   ├── QUALITY_GATES.md        # make check gates
-│   ├── CHECKLIST.md            # Pre-commit / pre-release checklist
-│   ├── HOSTILE_INSIGHTS.md     # Lessons from hostile analysis
-│   └── VOICE_INPUT.md          # Dictation hotkey setup (editor integration)
-├── aes/                        # AES project mode (kanban, tickets, sprints)
-├── .aes/                       # AES hooks (pre-commit, pre-review, etc.)
-├── docker/                     # Multi-stage image, compose, entrypoint (ADR-003)
-└── .github/workflows/ci.yml    # CI
+│   ├── VISION.md
+│   ├── REQUIREMENTS.md
+│   ├── ROADMAP.md
+│   ├── ADR-001-backends-llamacpp.md
+│   ├── ADR-002-subprocess-backends.md
+│   ├── ADR-003-container-deployment.md
+│   ├── QUALITY_GATES.md
+│   ├── CHECKLIST.md
+│   ├── HOSTILE_INSIGHTS.md
+│   └── VOICE_INPUT.md
+├── aes/
+│   ├── kanban.md                # Project kanban
+│   ├── tickets/                 # AES tickets
+│   └── sprints/                 # Sprints
+├── scripts/
+│   ├── verify-implementation.sh # Acceptance criteria verification
+│   └── voicevision-listen-and-copy.sh  # Listen + copy wrapper
+├── docker/
+│   ├── Dockerfile               # Multi-stage Docker image
+│   ├── voicevision-compose.yml  # Docker Compose
+│   └── entrypoint.sh            # Container entrypoint
+├── .aes/
+│   ├── hooks/                   # AES hooks (pre-commit, etc.)
+│   └── hooks/pre-commit.sh      # Pre-commit hook
+├── pyproject.toml               # Project configuration
+├── Makefile                     # Build and quality gates
+├── install-voice-input.sh       # System dependency installer
+├── CLAUDE.md                    # AI agent operational contract
+├── README.md                    # This file
+└── LICENSE                      # MIT License
 ```
 
-## Quality gates
+---
 
-Run the full gate before every commit:
+# 📋 Quality Gates
+
+Run `make check` before every commit:
 
 ```bash
 make check
 ```
 
-This runs docs, code, test, and lint checks:
+This runs:
 
 | Gate | Command |
 |------|---------|
@@ -446,15 +225,19 @@ This runs docs, code, test, and lint checks:
 Individual targets:
 
 ```bash
-make test            # unit tests (no models, no audio hardware)
-make test-integration # requires real models and audio device
-make lint            # ruff, mypy --strict, bandit
-make format          # ruff format
-make doctor          # environment status (Python, ruff, mypy, pytest, optional deps)
-make preflight       # why is this not working right now
+make test              # unit tests (no models, no audio hardware)
+make test-integration  # requires real models and audio device
+make test-all          # run all tests
+make test-coverage     # HTML coverage report
+make lint              # ruff, mypy --strict, bandit
+make format            # ruff format
+make doctor            # environment status
+make preflight         # why is this not working right now
 ```
 
-## Contributing
+---
+
+# 🤝 Contributing
 
 This project follows the [AES protocol](https://github.com/rodolfomatos/aes)
 (AES — Ambrósio Engineering System). Every non-trivial task goes through
@@ -475,8 +258,11 @@ Before changing anything about backends, read
 
 MIT. See `LICENSE`.
 
-## Version history
+## Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 0.2.1 | 2026-11-07 | Makefile with voicevision-specific targets; docs fixes |
+| 0.2.0 | 2026-11-07 | Vision backends (OpenCV + Playwright), MoondreamBackend, describe_and_answer(), conversation memory, streaming LLM → TTS |
+| 0.1.1 | 2026-11-07 | Fix env-dependent tests, add vision example to README |
 | 0.1.0 | 2026-11-06 | Voice loop: VAD → STT → LLM → filter → TTS; listen mode; subprocess backends; Dummy backends; preflight; quality gates |
