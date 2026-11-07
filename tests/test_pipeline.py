@@ -328,6 +328,123 @@ class TestPipelineConfigValidation:
             _ = pipeline.tts
 
 
+class TestStreaming:
+    def test_streaming_enabled_config(self) -> None:
+        """streaming_enabled defaults to False."""
+        config = PipelineConfig()
+        assert config.streaming_enabled is False
+
+    def test_streaming_enabled_true(self) -> None:
+        config = PipelineConfig(
+            stt_model="/m.bin",
+            llm_model="/m.gguf",
+            tts_model="/m.onnx",
+            streaming_enabled=True,
+        )
+        assert config.streaming_enabled is True
+
+    def test_stream_processes_chunks_with_streaming(
+        self,
+        mock_backends,
+    ) -> None:
+        """Stream processing with streaming_enabled sends TTS chunks as LLM generates them."""
+        mock_backends["vad_instance"].segment.side_effect = [
+            [(0, 960)],  # First chunk has utterance
+            [],  # Second chunk has none
+            [],  # Final buffer check
+        ]
+        mock_backends["stt_instance"].transcribe.return_value = "hello world"
+        # LLM returns chunks incrementally
+        mock_backends["llm_instance"].complete_stream.return_value = iter(["hello ", "world"])
+        mock_backends["tts_instance"].synthesize.side_effect = [
+            b"wav_hello",
+            b"wav_world",
+        ]
+
+        config = PipelineConfig(
+            stt_model="/m.bin",
+            llm_model="/m.gguf",
+            tts_model="/m.onnx",
+            streaming_enabled=True,
+        )
+        pipeline = VoicePipeline(config)
+
+        def chunk_iter():
+            yield b"x" * 480
+            yield b"x" * 480
+
+        results = list(pipeline.process_stream(chunk_iter()))
+
+        # TTS called once per LLM chunk
+        assert len(results) == 2
+        assert results[0] == b"wav_hello"
+        assert results[1] == b"wav_world"
+
+        # Verify complete_stream was called (not complete)
+        mock_backends["llm_instance"].complete_stream.assert_called_once()
+        mock_backends["llm_instance"].complete.assert_not_called()
+
+    def test_stream_with_empty_transcript(self, mock_backends) -> None:
+        """Stream with empty transcript yields nothing."""
+        mock_backends["vad_instance"].segment.side_effect = [
+            [(0, 960)],
+            [],
+            [],
+        ]
+        mock_backends["stt_instance"].transcribe.return_value = ""
+        mock_backends["llm_instance"].complete_stream.return_value = iter([])
+
+        config = PipelineConfig(
+            stt_model="/m.bin",
+            llm_model="/m.gguf",
+            tts_model="/m.onnx",
+            streaming_enabled=True,
+        )
+        pipeline = VoicePipeline(config)
+
+        def chunk_iter():
+            yield b"x" * 480
+            yield b"x" * 480
+
+        results = list(pipeline.process_stream(chunk_iter()))
+        assert results == []
+        mock_backends["tts_instance"].synthesize.assert_not_called()
+
+    def test_stream_with_empty_thinking_filtered(self, mock_backends) -> None:
+        """Stream with thinking-only text yields nothing until real text arrives."""
+        mock_backends["vad_instance"].segment.side_effect = [
+            [(0, 960)],
+            [],
+            [],
+        ]
+        mock_backends["stt_instance"].transcribe.return_value = "hello"
+        # LLM returns thinking trace first, then real text
+        mock_backends["llm_instance"].complete_stream.side_effect = [
+            iter(["thinking...", "hello world"]),
+        ]
+        mock_backends["tts_instance"].synthesize.side_effect = [
+            b"wav_hello world",
+        ]
+
+        config = PipelineConfig(
+            stt_model="/m.bin",
+            llm_model="/m.gguf",
+            tts_model="/m.onnx",
+            streaming_enabled=True,
+            enable_thinking_filter=True,
+        )
+        pipeline = VoicePipeline(config)
+
+        def chunk_iter():
+            yield b"x" * 480
+            yield b"x" * 480
+
+        results = list(pipeline.process_stream(chunk_iter()))
+
+        assert results == [b"wav_hello world"]
+        mock_backends["tts_instance"].synthesize.assert_called_once_with("hello world")
+
+
 class TestConversationMemory:
     def test_memory_retained_across_calls(self, mock_backends) -> None:
         """Conversation history is retained across multiple process() calls."""

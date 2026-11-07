@@ -25,6 +25,7 @@ import json
 import shutil
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Final
 
@@ -169,6 +170,82 @@ class LlamaCppBackend(ResidentBackend):
 
         body = self._post("/completion", payload)
         return self.parse_completion(body)
+
+    def complete_stream(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        stop: list[str] | None = None,
+    ) -> Iterator[str]:
+        """Stream completion text chunks as they are generated.
+
+        Uses llama.cpp's streaming mode (`stream=true`). Yields text chunks
+        as they arrive from the server, allowing callers to start TTS
+        synthesis before the full response is ready.
+        """
+        self.ensure_running()
+
+        payload: dict[str, Any] = {
+            "prompt": prompt,
+            "temperature": temperature,
+            "n_predict": max_tokens,
+            "stream": True,
+        }
+        if stop:
+            payload["stop"] = stop
+
+        import urllib.request  # noqa: PLC0415 - lazy import
+
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}/completion",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=self._request_timeout) as response:  # noqa: S310
+                for line in response:
+                    line = line.decode("utf-8", errors="replace").strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]  # Remove "data: " prefix
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        content = chunk.get("content", "")
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue  # Skip malformed JSON lines
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(2048).decode("utf-8", errors="replace")
+            raise BackendExecutionError(
+                self.name,
+                f"llama-server returned HTTP {exc.code}",
+                command=self.command_line,
+                returncode=exc.code,
+                stderr=detail,
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise BackendExecutionError(
+                self.name,
+                f"could not reach llama-server at {self.base_url}: {exc.reason}. "
+                "It may have exited or not finished loading the model.",
+                command=self.command_line,
+                stderr=self.server_log(),
+            ) from exc
+        except TimeoutError as exc:
+            raise BackendExecutionError(
+                self.name,
+                f"llama-server did not respond within {self._request_timeout:g}s "
+                "(generation may be too slow for this hardware)",
+                command=self.command_line,
+            ) from exc
 
     @staticmethod
     def parse_completion(body: dict[str, Any]) -> Completion:

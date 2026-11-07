@@ -55,6 +55,9 @@ class PipelineConfig:
     # Conversation memory
     max_context_utterances: int = 5
 
+    # Streaming
+    streaming_enabled: bool = False
+
 
 class VoicePipeline:
     """End-to-end voice pipeline: audio in -> audio out."""
@@ -190,7 +193,8 @@ class VoicePipeline:
         This is a simplified streaming version that buffers audio until
         VAD detects an utterance, then processes it fully.
 
-        Note: True streaming (token-by-token TTS) is not implemented in v0.1.
+        When streaming_enabled is True, TTS synthesis starts as soon as the
+        LLM generates text chunks, reducing perceived latency.
         """
         buffer = bytearray()
         for chunk in audio_chunks:
@@ -214,12 +218,57 @@ class VoicePipeline:
 
         transcript = self.stt.transcribe(utterance_pcm)
         if transcript.strip():
-            completion = self.llm.complete(transcript)
-            response = completion.content
-            if self.config.enable_thinking_filter:
-                response = self._filter_thinking(response)
-            if response.strip():
-                yield self.tts.synthesize(response)
+            yield from self._process_transcript(transcript)
+
+    def _process_transcript(self, transcript: str) -> Iterator[bytes]:
+        """Process a transcript through LLM → filter → TTS.
+
+        When streaming_enabled, yields TTS chunks as soon as the LLM generates
+        them. Otherwise, waits for the full response before synthesizing.
+        """
+        context = self._build_conversation_context()
+        prompt = f"{context}User: {transcript}\nAssistant:" if context else transcript
+
+        if self.config.streaming_enabled:
+            yield from self._stream_transcript(transcript, prompt)
+        else:
+            yield from self._process_transcript_sync(transcript, prompt)
+
+    def _stream_transcript(self, transcript: str, prompt: str) -> Iterator[bytes]:
+        """Stream transcription: LLM → TTS chunks as they arrive."""
+        full_response = ""
+        for chunk in self.llm.complete_stream(prompt):
+            full_response += chunk
+            if chunk.strip():
+                # Filter thinking traces from accumulated text
+                if self.config.enable_thinking_filter:
+                    filtered = self._filter_thinking(full_response)
+                    if filtered.strip():
+                        yield self.tts.synthesize(filtered)
+                else:
+                    yield self.tts.synthesize(chunk)
+
+        # Store in conversation history
+        if full_response.strip():
+            self._conversation_history.append((transcript, full_response))
+
+    def _process_transcript_sync(self, transcript: str, prompt: str) -> Iterator[bytes]:
+        """Process transcript synchronously: wait for full LLM response."""
+        completion = self.llm.complete(prompt)
+        response_text = completion.content
+
+        # Filter: strip thinking traces if enabled
+        if self.config.enable_thinking_filter:
+            response_text = self._filter_thinking(response_text)
+
+        if not response_text.strip():
+            return
+
+        # Store in conversation history
+        self._conversation_history.append((transcript, response_text))
+
+        # TTS: synthesize response
+        yield self.tts.synthesize(response_text)
 
     def describe_and_answer(
         self,
