@@ -23,12 +23,14 @@ import sys
 import time
 import unicodedata
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Final
 
 from voicevision.audio import pcm16_to_wav
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
 from voicevision.errors import BackendExecutionError, BackendNotAvailableError
+from voicevision.history import HistoryEntry, HistoryStore, default_history_path
 
 #: whisper.cpp requires 16 kHz mono PCM16; VAD operates at the same rate.
 DEFAULT_SAMPLE_RATE: Final = 16_000
@@ -132,6 +134,8 @@ class ListenConfig:
     pre_roll_seconds: float = 0.0
     json_output: bool = False
     quiet: bool = False
+    history_enabled: bool = False
+    history_file: str = ""
 
 
 def _env_int(name: str, default: int) -> int:
@@ -154,6 +158,14 @@ def _env_float(name: str, default: float) -> float:
         return float(raw)
     except ValueError:
         return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean env var (0/false/no/off disable; anything else enables)."""
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw not in {"0", "false", "no", "off"}
 
 
 def _normalize_text(text: str) -> str:
@@ -207,6 +219,8 @@ def load_config() -> ListenConfig:
         wake_word=os.environ.get("VOICEVISION_WAKE_WORD", ""),
         pre_roll_seconds=_env_float("VOICEVISION_PRE_ROLL_SECONDS", 0.0),
         quiet=_env_int("VOICEVISION_QUIET", 0) == 1,
+        history_enabled=_env_bool("VOICEVISION_HISTORY_ENABLED", True),
+        history_file=os.environ.get("VOICEVISION_HISTORY_FILE", ""),
     )
 
 
@@ -220,6 +234,36 @@ def _diag(config: ListenConfig, message: str) -> None:
     """
     if not config.quiet:
         print(message, file=sys.stderr)
+
+
+def _record_history(
+    config: ListenConfig,
+    transcript: str,
+    *,
+    pcm_duration_seconds: float | None,
+    transcription_ms: float | None,
+    wake_word: str | None = None,
+) -> None:
+    """Append the transcript to the history file, best effort.
+
+    A history failure must never fail dictation: the user already has the
+    transcript on stdout, and losing the record is preferable to losing the
+    session. The warning is suppressed in quiet mode like other diagnostics.
+    """
+    if not config.history_enabled or not transcript:
+        return
+    path = Path(config.history_file).expanduser() if config.history_file else default_history_path()
+    entry = HistoryEntry.now(
+        transcript,
+        language=config.stt_language,
+        audio_duration_seconds=pcm_duration_seconds,
+        transcription_ms=transcription_ms,
+        wake_word=wake_word,
+    )
+    try:
+        HistoryStore(path).append(entry)
+    except OSError as exc:
+        _diag(config, f"warning: could not write history: {exc}")
 
 
 class ListenError(RuntimeError):
@@ -418,6 +462,12 @@ def run(config: ListenConfig | None = None) -> int:
     transcription_ms = (time.monotonic() - start_time) * 1000
 
     if transcript:
+        _record_history(
+            config,
+            transcript,
+            pcm_duration_seconds=pcm_duration_seconds,
+            transcription_ms=transcription_ms,
+        )
         print(
             _format_output(
                 transcript,
@@ -484,6 +534,13 @@ def _run_wake_word(config: ListenConfig) -> int:
                     transcript_result, transcription_ms = result
                     assert transcript_result is not None
                     pcm_duration_seconds = len(pcm[:usable]) / (DEFAULT_SAMPLE_RATE * 2)
+                    _record_history(
+                        config,
+                        transcript_result,
+                        pcm_duration_seconds=pcm_duration_seconds,
+                        transcription_ms=transcription_ms,
+                        wake_word=config.wake_word,
+                    )
                     print(
                         _format_output(
                             transcript_result,
@@ -608,6 +665,17 @@ def main() -> None:
         help="Suppress progress and outcome messages on stderr "
         "(fatal errors are still reported)",
     )
+    parser.add_argument(
+        "--no-history",
+        action="store_true",
+        default=False,
+        help="Do not append this transcript to the history file",
+    )
+    parser.add_argument(
+        "--history-file",
+        default="",
+        help="History file path (default: ~/.voicevision/history.jsonl)",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -624,6 +692,10 @@ def main() -> None:
         config = replace(config, json_output=True)
     if args.quiet:
         config = replace(config, quiet=True)
+    if args.no_history:
+        config = replace(config, history_enabled=False)
+    if args.history_file:
+        config = replace(config, history_file=args.history_file)
 
     sys.exit(run(config))
 

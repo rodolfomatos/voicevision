@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`voicevision-listen --quiet`** (T026): suppresses progress and outcome
   messages on stderr, leaving only the transcript (or JSON) on stdout. Fatal
   errors are still reported. Also configurable via `VOICEVISION_QUIET=1`
+- **Transcript history** (T027): every transcription is appended to
+  `~/.voicevision/history.jsonl` (JSON Lines, `0600`). New `voicevision-history`
+  CLI lists or clears it; `--no-history` and `VOICEVISION_HISTORY_ENABLED=0`
+  opt out
 
 ### Fixed
 

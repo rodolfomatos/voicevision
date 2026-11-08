@@ -221,6 +221,8 @@ overridden per-invocation. Prefix: `VOICEVISION_`.
 | `VOICEVISION_WAKE_WORD` | *(empty)* | Wake word to listen for (e.g. `Olá Ambrósio`); empty disables wake word mode |
 | `VOICEVISION_PRE_ROLL_SECONDS` | `0` | Seconds of audio prepended before each utterance in wake word mode |
 | `VOICEVISION_QUIET` | `0` | `1` suppresses progress/outcome messages on stderr (fatal errors still reported) |
+| `VOICEVISION_HISTORY_ENABLED` | `1` | `0` disables transcript persistence |
+| `VOICEVISION_HISTORY_FILE` | `~/.voicevision/history.jsonl` | Transcript history file (JSON Lines) |
 
 ### Example: English language, 3-second silence threshold
 
@@ -291,6 +293,8 @@ voicevision-listen
 | `--pre-roll-seconds N` | Seconds of audio prepended before each utterance in wake word mode |
 | `--json` | Print a JSON object (transcript, timestamp, language, duration, latency) |
 | `--quiet` | Suppress progress/outcome messages on stderr; fatal errors are still reported |
+| `--no-history` | Do not append this transcript to the history file |
+| `--history-file PATH` | Override the history file path |
 
 ---
 

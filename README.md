@@ -115,6 +115,24 @@ voicevision-listen-and-copy
 This records 5 seconds, transcribes, and copies the result to your clipboard.
 Then paste with `Ctrl+V` into any application.
 
+## Transcript history
+
+Every successful transcription is appended as one JSON object per line to
+`~/.voicevision/history.jsonl` (created with `0600` permissions inside a
+`0700` directory). Disable it with `--no-history` or
+`VOICEVISION_HISTORY_ENABLED=0`.
+
+```bash
+# Show the 10 most recent transcripts
+voicevision-history --limit 10
+
+# Raw JSON Lines (for scripts)
+voicevision-history --json
+
+# Empty the file
+voicevision-history --clear
+```
+
 ## Keybind setup (Cinnamon desktop)
 
 System Settings → Keyboard → Shortcuts → Custom Shortcuts → +

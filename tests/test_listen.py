@@ -23,6 +23,7 @@ from tests.support.fake_child import (
 from voicevision.audio import pcm16_to_wav
 from voicevision.backends.whisper_cpp import WhisperCppBackend
 from voicevision.errors import BackendExecutionError, BackendNotAvailableError
+from voicevision.history import HistoryStore
 from voicevision.listen import (
     FRAME_BYTES,
     ListenConfig,
@@ -83,6 +84,8 @@ class TestLoadConfig:
         assert cfg.wake_word == ""
         assert cfg.pre_roll_seconds == 0.0
         assert cfg.quiet is False
+        assert cfg.history_enabled is True
+        assert cfg.history_file == ""
 
     def test_from_env(self, monkeypatch: Any) -> None:
         monkeypatch.setenv("VOICEVISION_STT_MODEL", "/models/whisper-base.bin")
@@ -93,6 +96,8 @@ class TestLoadConfig:
         monkeypatch.setenv("VOICEVISION_WAKE_WORD", "olá ambrósio")
         monkeypatch.setenv("VOICEVISION_PRE_ROLL_SECONDS", "5")
         monkeypatch.setenv("VOICEVISION_QUIET", "1")
+        monkeypatch.setenv("VOICEVISION_HISTORY_ENABLED", "0")
+        monkeypatch.setenv("VOICEVISION_HISTORY_FILE", "/tmp/history.jsonl")
         cfg = load_config()
         assert cfg.stt_model == "/models/whisper-base.bin"
         assert cfg.stt_language == "pt"
@@ -102,6 +107,8 @@ class TestLoadConfig:
         assert cfg.wake_word == "olá ambrósio"
         assert cfg.pre_roll_seconds == 5.0
         assert cfg.quiet is True
+        assert cfg.history_enabled is False
+        assert cfg.history_file == "/tmp/history.jsonl"
 
 
 # -- sounddevice fake --------------------------------------------------------
@@ -617,6 +624,115 @@ class TestQuietMode:
             )
         assert code == 2
         assert "transcription failed" in capsys.readouterr().err
+
+
+# -- history integration -----------------------------------------------------
+
+
+class TestHistoryIntegration:
+    """T027: transcripts are persisted to a JSON Lines file."""
+
+    def test_successful_transcription_appends_history(self, tmp_path: Any) -> None:
+        history_file = tmp_path / "history.jsonl"
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    history_enabled=True,
+                    history_file=str(history_file),
+                )
+            )
+        assert code == 0
+        entries = HistoryStore(history_file).read()
+        assert len(entries) == 1
+        assert entries[0].transcript == "ola mundo"
+        assert entries[0].language == "en"
+
+    def test_disabled_history_writes_nothing(self, tmp_path: Any) -> None:
+        history_file = tmp_path / "history.jsonl"
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    history_enabled=False,
+                    history_file=str(history_file),
+                )
+            )
+        assert code == 0
+        assert not history_file.exists()
+
+    def test_history_write_failure_does_not_break(self, tmp_path: Any, capsys: Any) -> None:
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    history_enabled=True,
+                    history_file=str(blocker / "history.jsonl"),
+                )
+            )
+        captured = capsys.readouterr()
+        assert code == 0
+        assert captured.out.strip() == "ola mundo"
+        assert "could not write history" in captured.err
+
+    def test_wake_word_records_the_wake_word(
+        self,
+        monkeypatch: Any,
+        tmp_path: Any,
+    ) -> None:
+        history_file = tmp_path / "history.jsonl"
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
+        fake_vad = FakeVadBackend(utterances=[[(0, FRAME_BYTES)]])
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="olá ambrósio ligue as luzes",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    max_record_seconds=5.0,
+                    history_enabled=True,
+                    history_file=str(history_file),
+                )
+            )
+        assert code == 0
+        entries = HistoryStore(history_file).read()
+        assert len(entries) == 1
+        assert entries[0].transcript == "ligue as luzes"
+        assert entries[0].wake_word == "olá ambrósio"
 
 
 # -- wake word ---------------------------------------------------------------
