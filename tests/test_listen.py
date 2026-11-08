@@ -38,6 +38,7 @@ from voicevision.listen import (
     _transcribe_pcm,
     _wake_word_detected,
     load_config,
+    main,
     run,
 )
 
@@ -81,6 +82,7 @@ class TestLoadConfig:
         assert cfg.fixed_seconds == 0.0
         assert cfg.wake_word == ""
         assert cfg.pre_roll_seconds == 0.0
+        assert cfg.quiet is False
 
     def test_from_env(self, monkeypatch: Any) -> None:
         monkeypatch.setenv("VOICEVISION_STT_MODEL", "/models/whisper-base.bin")
@@ -90,6 +92,7 @@ class TestLoadConfig:
         monkeypatch.setenv("VOICEVISION_MAX_RECORD_SECONDS", "30")
         monkeypatch.setenv("VOICEVISION_WAKE_WORD", "olá ambrósio")
         monkeypatch.setenv("VOICEVISION_PRE_ROLL_SECONDS", "5")
+        monkeypatch.setenv("VOICEVISION_QUIET", "1")
         cfg = load_config()
         assert cfg.stt_model == "/models/whisper-base.bin"
         assert cfg.stt_language == "pt"
@@ -98,6 +101,7 @@ class TestLoadConfig:
         assert cfg.max_record_seconds == 30.0
         assert cfg.wake_word == "olá ambrósio"
         assert cfg.pre_roll_seconds == 5.0
+        assert cfg.quiet is True
 
 
 # -- sounddevice fake --------------------------------------------------------
@@ -471,6 +475,148 @@ class TestListenModeJson:
             raise AssertionError("Should not be valid JSON")
         except json.JSONDecodeError:
             pass
+
+
+# -- quiet mode --------------------------------------------------------------
+
+
+class TestQuietMode:
+    """T026: --quiet suppresses progress and outcome messages on stderr."""
+
+    def test_default_is_not_quiet(self, clean_env: Any) -> None:
+        assert load_config().quiet is False
+
+    def test_reads_env_var(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("VOICEVISION_QUIET", "1")
+        assert load_config().quiet is True
+
+    def test_env_var_zero_is_not_quiet(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("VOICEVISION_QUIET", "0")
+        assert load_config().quiet is False
+
+    def test_cli_flag_sets_quiet(
+        self,
+        monkeypatch: Any,
+    ) -> None:
+        """--quiet on the command line overrides the config default."""
+        captured: list[ListenConfig] = []
+
+        def fake_run(config: ListenConfig) -> int:
+            captured.append(config)
+            return 0
+
+        monkeypatch.setattr("voicevision.listen.run", fake_run)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["voicevision-listen", "--model", "/models/whisper-base.bin", "--quiet"],
+        )
+        with pytest.raises(SystemExit):
+            main()
+        assert captured
+        assert captured[0].quiet is True
+
+    def test_suppresses_progress_on_stderr(self, capsys: Any) -> None:
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(stt_model="/models/whisper-base.bin", quiet=True)
+            )
+        captured = capsys.readouterr()
+        assert code == 0
+        assert captured.out.strip() == "ola mundo"
+        assert captured.err == ""
+
+    def test_suppresses_no_speech_message(self, capsys: Any) -> None:
+        with patch(
+            "voicevision.listen._capture_until_utterance",
+            return_value=b"",
+        ):
+            code = run(
+                ListenConfig(stt_model="/models/whisper-base.bin", quiet=True)
+            )
+        captured = capsys.readouterr()
+        assert code == 0
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_suppresses_wake_word_progress(self, monkeypatch: Any, capsys: Any) -> None:
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
+        fake_vad = FakeVadBackend(utterances=[])
+        with patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    max_record_seconds=0.0,
+                    quiet=True,
+                )
+            )
+        captured = capsys.readouterr()
+        assert code == 0
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_quiet_with_json_prints_only_json(self, capsys: Any) -> None:
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    json_output=True,
+                    quiet=True,
+                )
+            )
+        captured = capsys.readouterr()
+        assert code == 0
+        assert captured.err == ""
+        data = json.loads(captured.out)
+        assert data["transcript"] == "ola mundo"
+
+    def test_capture_errors_still_reported(self, capsys: Any) -> None:
+        """Fatal errors must not be silenced: exit code alone is ambiguous."""
+        with patch(
+            "voicevision.listen._capture_until_utterance",
+            side_effect=ListenError("microphone unavailable"),
+        ):
+            code = run(
+                ListenConfig(stt_model="/models/whisper-base.bin", quiet=True)
+            )
+        assert code == 2
+        assert "microphone unavailable" in capsys.readouterr().err
+
+    def test_transcription_errors_still_reported(self, capsys: Any) -> None:
+        with (
+            patch(
+                "voicevision.listen._capture_until_utterance",
+                return_value=b"\x00" * FRAME_BYTES,
+            ),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                side_effect=BackendExecutionError("whispercpp", "process failed"),
+            ),
+        ):
+            code = run(
+                ListenConfig(stt_model="/models/whisper-base.bin", quiet=True)
+            )
+        assert code == 2
+        assert "transcription failed" in capsys.readouterr().err
 
 
 # -- wake word ---------------------------------------------------------------

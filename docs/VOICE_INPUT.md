@@ -218,6 +218,9 @@ overridden per-invocation. Prefix: `VOICEVISION_`.
 | `VOICEVISION_VAD_SILENCE_MS` | `2000` | Milliseconds of silence to end an utterance (default: 2000 = 2 seconds) |
 | `VOICEVISION_VAD_MAX_UTTERANCE_MS` | `30000` | Maximum utterance length in ms (runaway protection) |
 | `VOICEVISION_MAX_RECORD_SECONDS` | `60` | Maximum total recording time in seconds |
+| `VOICEVISION_WAKE_WORD` | *(empty)* | Wake word to listen for (e.g. `Olá Ambrósio`); empty disables wake word mode |
+| `VOICEVISION_PRE_ROLL_SECONDS` | `0` | Seconds of audio prepended before each utterance in wake word mode |
+| `VOICEVISION_QUIET` | `0` | `1` suppresses progress/outcome messages on stderr (fatal errors still reported) |
 
 ### Example: English language, 3-second silence threshold
 
@@ -284,6 +287,10 @@ voicevision-listen
 | `--model PATH` | Override `VOICEVISION_STT_MODEL` |
 | `--language CODE` | Override `VOICEVISION_STT_LANGUAGE` (default: `en`) |
 | `--seconds N` | Record for fixed N seconds instead of VAD detection |
+| `--wake-word TEXT` | Wake word to listen for (e.g. `"Olá Ambrósio"`) |
+| `--pre-roll-seconds N` | Seconds of audio prepended before each utterance in wake word mode |
+| `--json` | Print a JSON object (transcript, timestamp, language, duration, latency) |
+| `--quiet` | Suppress progress/outcome messages on stderr; fatal errors are still reported |
 
 ---
 

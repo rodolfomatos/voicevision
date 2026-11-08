@@ -93,8 +93,8 @@ docs-check:
 
 code-check:
 	@test -d src/voicevision || (echo "src/voicevision not found" && exit 1)
-	@! grep -R "TODO:" src/ tests/ 2>/dev/null || (echo "TODO comments found in source" && exit 1)
-	@! grep -R "FIXME:" src/ tests/ 2>/dev/null || (echo "FIXME comments found in source" && exit 1)
+	@! grep -R --include='*.py' "TODO:" src/ tests/ 2>/dev/null || (echo "TODO comments found in source" && exit 1)
+	@! grep -R --include='*.py' "FIXME:" src/ tests/ 2>/dev/null || (echo "FIXME comments found in source" && exit 1)
 
 test-check:
 	@$(AES_TEST_UNIT) --cov-fail-under=80

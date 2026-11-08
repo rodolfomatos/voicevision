@@ -131,6 +131,7 @@ class ListenConfig:
     wake_word: str = ""
     pre_roll_seconds: float = 0.0
     json_output: bool = False
+    quiet: bool = False
 
 
 def _env_int(name: str, default: int) -> int:
@@ -205,7 +206,20 @@ def load_config() -> ListenConfig:
         fixed_seconds=_env_float("VOICEVISION_FIXED_SECONDS", 0.0),
         wake_word=os.environ.get("VOICEVISION_WAKE_WORD", ""),
         pre_roll_seconds=_env_float("VOICEVISION_PRE_ROLL_SECONDS", 0.0),
+        quiet=_env_int("VOICEVISION_QUIET", 0) == 1,
     )
+
+
+def _diag(config: ListenConfig, message: str) -> None:
+    """Write a diagnostic message to stderr unless quiet mode is active.
+
+    Only progress and outcome messages are routed through here. Fatal errors
+    keep going to stderr unconditionally: suppressing them would leave callers
+    with nothing but an exit code, which is not enough to tell a missing
+    backend from a failed transcription.
+    """
+    if not config.quiet:
+        print(message, file=sys.stderr)
 
 
 class ListenError(RuntimeError):
@@ -231,7 +245,7 @@ def _capture_until_utterance(config: ListenConfig) -> bytes:
     buffer = bytearray()
     deadline = time.monotonic() + config.max_record_seconds
 
-    print("gravando... fale agora (VAD deteta a sua fala)", file=sys.stderr)
+    _diag(config, "gravando... fale agora (VAD deteta a sua fala)")
 
     try:
         import sounddevice as sd  # type: ignore[import-untyped]  # noqa: PLC0415 - lazy import per CLAUDE.md
@@ -277,7 +291,7 @@ def _capture_fixed_seconds(config: ListenConfig) -> bytes:
     total_frames = int(DEFAULT_SAMPLE_RATE * config.fixed_seconds)
     buffer = bytearray()
 
-    print(f"gravando por {config.fixed_seconds:.0f}s — fale agora...", file=sys.stderr)
+    _diag(config, f"gravando por {config.fixed_seconds:.0f}s — fale agora...")
 
     try:
         import sounddevice as sd  # noqa: PLC0415 - lazy import per CLAUDE.md
@@ -300,7 +314,7 @@ def _capture_fixed_seconds(config: ListenConfig) -> bytes:
     except OSError as exc:
         raise ListenError(f"could not open microphone: {exc}") from exc
 
-    print("gravação terminada.", file=sys.stderr)
+    _diag(config, "gravação terminada.")
     return bytes(buffer)
 
 
@@ -387,7 +401,7 @@ def run(config: ListenConfig | None = None) -> int:
         return 2
 
     if not pcm:
-        print("no speech detected", file=sys.stderr)
+        _diag(config, "no speech detected")
         return 0
 
     pcm_duration_seconds = len(pcm) / (DEFAULT_SAMPLE_RATE * 2)
@@ -413,7 +427,7 @@ def run(config: ListenConfig | None = None) -> int:
             )
         )
     else:
-        print("no speech detected", file=sys.stderr)
+        _diag(config, "no speech detected")
 
     return 0
 
@@ -429,10 +443,7 @@ def _run_wake_word(config: ListenConfig) -> int:
     Returns:
         0 on wake word detected or timeout; 2 on configuration/dependency error.
     """
-    print(
-        f"listening for wake word '{config.wake_word}'...",
-        file=sys.stderr,
-    )
+    _diag(config, f"listening for wake word '{config.wake_word}'...")
 
     deadline = time.monotonic() + config.max_record_seconds
     vad = WebrtcVadBackend(
@@ -489,7 +500,7 @@ def _run_wake_word(config: ListenConfig) -> int:
         print("  install: pip install voicevision[audio]", file=sys.stderr)
         return 2
 
-    print("wake word not detected", file=sys.stderr)
+    _diag(config, "wake word not detected")
     return 0
 
 
@@ -590,6 +601,13 @@ def main() -> None:
         default=False,
         help="Output transcript as JSON instead of plain text",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress progress and outcome messages on stderr "
+        "(fatal errors are still reported)",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -604,6 +622,8 @@ def main() -> None:
         config = replace(config, pre_roll_seconds=args.pre_roll_seconds)
     if args.json:
         config = replace(config, json_output=True)
+    if args.quiet:
+        config = replace(config, quiet=True)
 
     sys.exit(run(config))
 

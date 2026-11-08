@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import builtins
 import os
+import sys
 from contextlib import contextmanager
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -77,16 +79,11 @@ class TestConstruction:
         assert backend._silence_ms == 500
         assert backend._max_utterance_ms == 30000
 
-    def test_available_is_false_without_webrtcvad(self) -> None:
-        import sys
-
-        # Temporarily remove webrtcvad from sys.modules to simulate it not being installed
-        webrtcvad_mod = sys.modules.pop("webrtcvad", None)
-        try:
-            assert WebrtcVadBackend.available() is False
-        finally:
-            if webrtcvad_mod is not None:
-                sys.modules["webrtcvad"] = webrtcvad_mod
+    def test_available_is_false_without_webrtcvad(self, monkeypatch: Any) -> None:
+        # A None entry in sys.modules makes `import webrtcvad` raise ImportError
+        # without depending on whether the real package is installed.
+        monkeypatch.setitem(sys.modules, "webrtcvad", None)
+        assert WebrtcVadBackend.available() is False
 
 
 # -- segmentation ----------------------------------------------------------

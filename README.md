@@ -98,6 +98,12 @@ python -m voicevision.listen --seconds 5
 # With wake word detection (default 5 second timeout)
 VOICEVISION_STT_MODEL=/models/whisper-base.bin \
 voicevision-listen --wake-word "Olá Ambrósio"
+
+# Machine-readable output for scripts and automation
+voicevision-listen --seconds 5 --json
+
+# Automation mode: only the transcript on stdout, no progress messages
+voicevision-listen --seconds 5 --quiet
 ```
 
 ## With clipboard (for OpenCode / any editor)

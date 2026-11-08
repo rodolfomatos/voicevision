@@ -21,7 +21,9 @@ class TestMoondreamBackend:
         assert MoondreamBackend.available() is False
 
     def test_available_true_with_httpx(self, monkeypatch: Any) -> None:
-        import httpx  # noqa: F401 - just checking it's importable
+        # Inject a fake httpx so the assertion does not depend on the optional
+        # dependency being installed in the current environment.
+        monkeypatch.setitem(sys.modules, "httpx", MagicMock())
 
         assert MoondreamBackend.available() is True
 
