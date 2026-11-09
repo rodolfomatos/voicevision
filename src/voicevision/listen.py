@@ -401,7 +401,7 @@ def _transcribe_pcm(pcm: bytes, config: ListenConfig) -> str:
         model=config.stt_model,
         language=config.stt_language,
     )
-    return stt.transcribe(wav)
+    return stt.transcribe(wav, language=config.stt_language)
 
 
 def _format_output(
@@ -747,7 +747,7 @@ def main() -> None:
     parser.add_argument(
         "--language",
         default="en",
-        help="STT language code (default: en)",
+        help="STT language code (default: en). Use 'auto' for automatic detection.",
     )
     parser.add_argument(
         "--seconds",

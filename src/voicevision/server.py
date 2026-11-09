@@ -221,7 +221,23 @@ class VoiceVisionService:
 
     def transcribe(self, wav: bytes, language: str) -> tuple[str, float]:
         """Transcribe WAV audio; return the transcript and elapsed ms."""
-        stt = self._stt.get(language)
+        # Handle auto language detection
+        if language == "auto":
+            if not self.config.stt_model:
+                raise ConfigurationError(
+                    "VOICEVISION_STT_MODEL is not set — cannot transcribe audio"
+                )
+            # Create a temporary backend for language detection
+            stt_detect = WhisperCppBackend(model=self.config.stt_model, language="en")
+            detected_lang = stt_detect.detect_language(wav)
+            # Now transcribe with the detected language
+            stt_auto = WhisperCppBackend(model=self.config.stt_model, language=detected_lang)
+            started = time.monotonic()
+            transcript = stt_auto.transcribe(wav)
+            elapsed_ms = (time.monotonic() - started) * 1000.0
+            return transcript, elapsed_ms
+
+        stt: WhisperCppBackend | None = self._stt.get(language)
         if stt is None:
             if not self.config.stt_model:
                 raise ConfigurationError(
@@ -393,7 +409,8 @@ class _RequestHandler(BaseHTTPRequestHandler):
         transcript, elapsed_ms = self._app.transcribe(wav, language)
         return {
             "transcript": transcript,
-            "language": language,
+            "language": language if language != "auto" else "auto",
+            "detected_language": language if language == "auto" else None,
             "transcription_ms": round(elapsed_ms, 3),
         }
 

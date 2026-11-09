@@ -198,11 +198,11 @@ class TestTranscribe:
             body={"audio_base64": _audio_b64(pcm), "language": "pt"},
         )
         assert status == 200
-        assert _json(body) == {
-            "transcript": "hello world",
-            "language": "pt",
-            "transcription_ms": 12.5,
-        }
+        data = _json(body)
+        assert data["transcript"] == "hello world"
+        assert data["language"] == "pt"
+        assert data["transcription_ms"] == 12.5
+        assert data["detected_language"] is None
         wav, language = service.transcribed[0]
         assert language == "pt"
         assert wav[:4] == b"RIFF"
@@ -228,7 +228,9 @@ class TestTranscribe:
             body={"audio_base64": _audio_b64(b"\x00\x00" * 100)},
         )
         assert status == 200
-        assert _json(body)["language"] == "en"
+        data = _json(body)
+        assert data["language"] == "en"
+        assert data["detected_language"] is None
         assert service.transcribed[0][1] == "en"
 
     def test_missing_audio_is_400(self, live: tuple[Any, FakeService]) -> None:

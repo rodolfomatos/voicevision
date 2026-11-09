@@ -14,6 +14,7 @@ from typing import ClassVar, Final
 
 from voicevision.audio import require_whisper_format
 from voicevision.backends.subprocess_backend import SubprocessBackend
+from voicevision.errors import BackendExecutionError
 
 #: whisper.cpp prefixes each segment with `[00:00:00.000 --> 00:00:02.000]`.
 #: `-nt` suppresses these, but forks differ, so strip defensively rather than
@@ -61,6 +62,7 @@ class WhisperCppBackend(SubprocessBackend):
         self._extra_args = list(extra_args or [])
 
         chosen = binary or self._resolve_binary()
+        self._binary = chosen
         super().__init__(
             self._build_argv(chosen),
             timeout=timeout,
@@ -98,13 +100,13 @@ class WhisperCppBackend(SubprocessBackend):
         candidates = (cls.executable, *cls.alternate_executables)
         return any(shutil.which(c) for c in candidates)
 
-    def transcribe(self, audio: bytes, **kwargs: object) -> str:
+    def transcribe(self, audio: bytes, *, language: str | None = None, **kwargs: object) -> str:
         """Transcribe a WAV file.
 
         Args:
             audio: 16 kHz mono PCM16 WAV bytes.
-            **kwargs: ignored; per-call overrides belong on the constructor so
-                they land in argv rather than being silently dropped.
+            language: Language code (e.g., 'en', 'pt') or "auto" for detection.
+                If None, uses the language from constructor.
 
         Returns:
             The transcript. Empty string when the audio contains no speech —
@@ -115,13 +117,27 @@ class WhisperCppBackend(SubprocessBackend):
             BackendNotAvailableError: if whisper.cpp is not installed.
             BackendExecutionError: if whisper.cpp fails.
         """
-        del kwargs
         # Validate before spawning. A format problem is the caller's bug and
         # naming it precisely is more useful than whatever whisper.cpp makes of
         # it. Never resample here — see voicevision.audio.
         require_whisper_format(audio)
 
-        raw = self.run(audio).decode("utf-8", errors="replace")
+        # Auto-detect language if requested
+        if language == "auto":
+            language = self.detect_language(audio)
+
+        # If language differs from constructor, rebuild argv
+        if language and language != self._language:
+            original_language = self._language
+            self._language = language
+            self._argv = self._build_argv(self._binary or self._resolve_binary())
+            try:
+                raw = self.run(audio).decode("utf-8", errors="replace")
+            finally:
+                self._language = original_language
+                self._argv = self._build_argv(self._binary or self._resolve_binary())
+        else:
+            raw = self.run(audio).decode("utf-8", errors="replace")
         return self.parse_transcript(raw)
 
     @staticmethod
@@ -139,6 +155,45 @@ class WhisperCppBackend(SubprocessBackend):
             if line.strip() and not _FILE_WRITTEN.match(line)
         ]
         return " ".join(lines).strip()
+
+    def detect_language(self, audio: bytes) -> str:
+        """Detect the language of the audio using whisper.cpp.
+
+        Runs whisper.cpp with `--detect-language` and parses the detected
+        language code from the output.
+
+        Args:
+            audio: 16 kHz mono PCM16 WAV bytes.
+
+        Returns:
+            ISO 639-1 language code (e.g., 'en', 'pt', 'es').
+
+        Raises:
+            BackendExecutionError: if whisper.cpp fails or language cannot be detected.
+        """
+        require_whisper_format(audio)
+        # Build argv with --detect-language flag
+        argv = list(self._argv)
+        # Remove -np (no progress) to allow output
+        argv = [arg for arg in argv if arg != "-np"]
+        argv.extend(["--detect-language"])
+        # Temporarily override argv for this run
+        original_argv = self._argv
+        self._argv = argv
+        try:
+            raw = self.run(audio).decode("utf-8", errors="replace")
+        finally:
+            self._argv = original_argv
+        # Parse detected language from output like "detected language: en"
+        import re
+        match = re.search(r"detected language:\s*(\w+)", raw, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+        # Fallback: check for "language: en" format
+        match = re.search(r"language:\s*(\w+)", raw, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+        raise BackendExecutionError("whispercpp", "could not detect language from output")
 
 
 DEFAULT_MODEL_NAME: Final = "whisper-base.bin"
