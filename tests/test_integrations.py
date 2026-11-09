@@ -81,6 +81,52 @@ class TestHomeAssistant:
         assert strings["config"]["step"]["user"]["data"]["base_url"]
 
 
+class TestVSCode:
+    def _root(self) -> Path:
+        return INTEGRATIONS / "vscode"
+
+    def test_manifest(self) -> None:
+        manifest = json.loads((self._root() / "package.json").read_text())
+        assert manifest["main"] == "./extension.js"
+        assert manifest["engines"]["vscode"]
+
+    def test_commands_are_declared(self) -> None:
+        manifest = json.loads((self._root() / "package.json").read_text())
+        commands = {
+            entry["command"] for entry in manifest["contributes"]["commands"]
+        }
+        assert commands == {
+            "voicevision.dictate",
+            "voicevision.transcribeFile",
+            "voicevision.ask",
+        }
+
+    def test_extension_registers_declared_commands(self) -> None:
+        source = (self._root() / "extension.js").read_text()
+        for command in (
+            "voicevision.dictate",
+            "voicevision.transcribeFile",
+            "voicevision.ask",
+        ):
+            assert command in source
+
+    def test_configuration_keys(self) -> None:
+        manifest = json.loads((self._root() / "package.json").read_text())
+        properties = manifest["contributes"]["configuration"]["properties"]
+        for key in (
+            "voicevision.serverUrl",
+            "voicevision.token",
+            "voicevision.language",
+            "voicevision.listenCommand",
+            "voicevision.listenArgs",
+            "voicevision.maxTokens",
+        ):
+            assert key in properties, key
+
+    def test_readme_exists(self) -> None:
+        assert (self._root() / "README.md").is_file()
+
+
 class TestJavaScript:
     @pytest.mark.parametrize(
         "path",

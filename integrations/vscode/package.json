@@ -1,0 +1,82 @@
+{
+  "name": "voicevision",
+  "displayName": "voicevision",
+  "description": "Offline dictation, audio transcription and local LLM answers in VS Code.",
+  "version": "0.1.0",
+  "publisher": "rodolfomatos",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "voice",
+    "dictation",
+    "offline",
+    "whisper",
+    "llm"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "voicevision.dictate",
+        "title": "voicevision: Dictate"
+      },
+      {
+        "command": "voicevision.transcribeFile",
+        "title": "voicevision: Transcribe Audio File"
+      },
+      {
+        "command": "voicevision.ask",
+        "title": "voicevision: Ask About Selection"
+      }
+    ],
+    "configuration": {
+      "title": "voicevision",
+      "properties": {
+        "voicevision.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8765",
+          "description": "Base URL of the local voicevision-server."
+        },
+        "voicevision.token": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token, when the server was started with one."
+        },
+        "voicevision.language": {
+          "type": "string",
+          "default": "",
+          "description": "STT language code (for example pt). Empty uses the server default."
+        },
+        "voicevision.listenCommand": {
+          "type": "string",
+          "default": "voicevision-listen",
+          "description": "Executable used by the Dictate command."
+        },
+        "voicevision.listenArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "--quiet"
+          ],
+          "description": "Arguments passed to voicevision-listen."
+        },
+        "voicevision.maxTokens": {
+          "type": "number",
+          "default": 512,
+          "description": "Maximum answer length for Ask About Selection."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "check": "node --check extension.js"
+  }
+}

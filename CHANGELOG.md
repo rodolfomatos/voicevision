@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   streaming. `integrations/homeassistant/` adds `voicevision.converse`,
   `voicevision.transcribe` and `voicevision.describe` services that fire a
   `voicevision_response` event
+- **VS Code extension** (T038): `integrations/vscode/` adds Dictate,
+  Transcribe Audio File and Ask About Selection commands. Plain JavaScript,
+  no build step; dictation shells out to `voicevision-listen`, the other two
+  use the local HTTP server
 
 ### Fixed
 
