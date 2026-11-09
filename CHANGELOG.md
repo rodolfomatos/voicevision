@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Transcribe Audio File and Ask About Selection commands. Plain JavaScript,
   no build step; dictation shells out to `voicevision-listen`, the other two
   use the local HTTP server
+- **Obsidian plugin and Notion export** (T039): `integrations/obsidian/` adds
+  Transcribe audio file and Ask about selection commands plus a settings tab;
+  `integrations/notion/` exports a transcript (or locally transcribed audio)
+  to a Notion page. Notion export is the only opt-in cloud step — inference
+  stays local and the token comes from `NOTION_TOKEN`
 
 ### Fixed
 

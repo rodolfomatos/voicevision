@@ -127,6 +127,40 @@ class TestVSCode:
         assert (self._root() / "README.md").is_file()
 
 
+class TestObsidian:
+    def _root(self) -> Path:
+        return INTEGRATIONS / "obsidian"
+
+    def test_manifest(self) -> None:
+        manifest = json.loads((self._root() / "manifest.json").read_text())
+        assert manifest["id"] == "voicevision"
+        assert manifest["isDesktopOnly"] is True
+        assert manifest["minAppVersion"]
+
+    def test_commands_and_settings(self) -> None:
+        source = (self._root() / "main.js").read_text()
+        assert "transcribe-audio-file" in source
+        assert "ask-about-selection" in source
+        assert "serverUrl" in source
+        assert "maxTokens" in source
+
+    def test_readme_exists(self) -> None:
+        assert (self._root() / "README.md").is_file()
+
+
+class TestNotion:
+    def _root(self) -> Path:
+        return INTEGRATIONS / "notion"
+
+    def test_script_and_readme_exist(self) -> None:
+        assert (self._root() / "voicevision_notion.py").is_file()
+        assert (self._root() / "README.md").is_file()
+
+    def test_uses_environment_token(self) -> None:
+        source = (self._root() / "voicevision_notion.py").read_text()
+        assert "NOTION_TOKEN" in source
+
+
 class TestJavaScript:
     @pytest.mark.parametrize(
         "path",

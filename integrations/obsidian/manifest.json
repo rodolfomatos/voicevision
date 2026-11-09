@@ -1,0 +1,10 @@
+{
+  "id": "voicevision",
+  "name": "voicevision",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Offline transcription and local LLM answers from a voicevision server.",
+  "author": "Rodolfo Ambrósio",
+  "authorUrl": "https://github.com/rodolfomatos/voicevision",
+  "isDesktopOnly": true
+}
