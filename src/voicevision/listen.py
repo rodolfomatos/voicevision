@@ -23,13 +23,14 @@ import os
 import sys
 import time
 import unicodedata
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final
 
 from voicevision.audio import pcm16_to_wav
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
+from voicevision.core.hotwords import HotwordConfig, load_hotwords, wake_words_detected
 from voicevision.errors import BackendExecutionError, BackendNotAvailableError
 from voicevision.history import HistoryEntry, HistoryStore, default_history_path
 
@@ -131,7 +132,7 @@ class ListenConfig:
     vad_max_utterance_ms: int = 30_000
     max_record_seconds: float = 60.0
     fixed_seconds: float = 0.0
-    wake_word: str = ""
+    hotwords: HotwordConfig = field(default_factory=HotwordConfig)
     pre_roll_seconds: float = 0.0
     json_output: bool = False
     quiet: bool = False
@@ -183,17 +184,30 @@ def _normalize_text(text: str) -> str:
     return " ".join(stripped.split())
 
 
-def _wake_word_detected(transcript: str, wake_word: str) -> bool:
-    """Return True if *transcript* contains *wake_word* (normalized substring).
+def _wake_word_detected(transcript: str, config: ListenConfig) -> tuple[bool, str | None]:
+    """Return (True, matched_word) if any configured wake word is in *transcript*.
 
     Both sides are normalized so accent/case/punctuation differences do not
     cause false negatives.
     """
+    return wake_words_detected(transcript, config.hotwords)
+
+
+def _strip_wake_word(transcript: str, wake_word: str) -> str:
+    """Return *transcript* with the first occurrence of *wake_word* removed.
+
+    Matching is normalized; the returned text is also normalized (lowercase,
+    no accents, collapsed whitespace). This matches the historical behaviour
+    used for JSON output.
+    """
     if not wake_word:
-        return False
-    norm_wake = _normalize_text(wake_word)
+        return transcript
     norm_text = _normalize_text(transcript)
-    return norm_wake in norm_text
+    norm_wake = _normalize_text(wake_word)
+    idx = norm_text.find(norm_wake)
+    if idx < 0:
+        return _normalize_text(transcript)
+    return norm_text[idx + len(norm_wake) :].strip()
 
 
 def _pre_roll_bytes(seconds: float) -> int:
@@ -207,9 +221,16 @@ def load_config() -> ListenConfig:
     Reads ``VOICEVISION_STT_MODEL``, ``VOICEVISION_STT_LANGUAGE``,
     ``VOICEVISION_VAD_AGGRESSIVENESS``, ``VOICEVISION_VAD_SILENCE_MS``,
     ``VOICEVISION_VAD_MAX_UTTERANCE_MS``,
-    ``VOICEVISION_MAX_RECORD_SECONDS``, ``VOICEVISION_WAKE_WORD`` and
-    ``VOICEVISION_PRE_ROLL_SECONDS``.
+    ``VOICEVISION_MAX_RECORD_SECONDS``, ``VOICEVISION_WAKE_WORD`` (legacy),
+    ``VOICEVISION_HOTWORDS`` and ``VOICEVISION_PRE_ROLL_SECONDS``.
     """
+    hotwords = load_hotwords()
+    # Backward compatibility: VOICEVISION_WAKE_WORD overrides the first word
+    if legacy_wake := os.environ.get("VOICEVISION_WAKE_WORD"):
+        hotwords = HotwordConfig(
+            words=[legacy_wake] + hotwords.words[1:],
+            threshold=hotwords.threshold,
+        )
     return ListenConfig(
         stt_model=os.environ.get("VOICEVISION_STT_MODEL", ""),
         stt_language=os.environ.get("VOICEVISION_STT_LANGUAGE", "en"),
@@ -218,7 +239,7 @@ def load_config() -> ListenConfig:
         vad_max_utterance_ms=_env_int("VOICEVISION_VAD_MAX_UTTERANCE_MS", 30_000),
         max_record_seconds=_env_float("VOICEVISION_MAX_RECORD_SECONDS", 60.0),
         fixed_seconds=_env_float("VOICEVISION_FIXED_SECONDS", 0.0),
-        wake_word=os.environ.get("VOICEVISION_WAKE_WORD", ""),
+        hotwords=hotwords,
         pre_roll_seconds=_env_float("VOICEVISION_PRE_ROLL_SECONDS", 0.0),
         quiet=_env_int("VOICEVISION_QUIET", 0) == 1,
         history_enabled=_env_bool("VOICEVISION_HISTORY_ENABLED", True),
@@ -408,8 +429,8 @@ def _format_output(
 
     if wake_word_detected is not None:
         result["wake_word_detected"] = wake_word_detected
-        if config.wake_word:
-            result["wake_word"] = config.wake_word
+        if config.hotwords.words:
+            result["wake_word"] = config.hotwords.words[0]
 
     return json.dumps(result, ensure_ascii=False)
 
@@ -434,14 +455,14 @@ def run(config: ListenConfig | None = None) -> int:
         )
         return 2
 
-    if config.continuous and not config.wake_word:
+    if config.continuous and not config.hotwords.words:
         print(
             "error: --continuous requires a wake word (--wake-word or VOICEVISION_WAKE_WORD)",
             file=sys.stderr,
         )
         return 2
 
-    if config.wake_word:
+    if config.hotwords.words:
         if config.continuous:
             return _run_wake_word_continuous(config)
         return _run_wake_word(config)
@@ -502,15 +523,16 @@ def _run_single_shot(config: ListenConfig) -> int:
 def _run_wake_word(config: ListenConfig) -> int:
     """Run listen mode with wake word detection.
 
-    Captures and transcribes utterances in a loop until one contains
-    *config.wake_word*. When detected, prints the transcript (with the wake
+    Captures and transcribes utterances in a loop until one contains any
+    configured wake word. When detected, prints the transcript (with the wake
     word stripped) to stdout and returns 0. If no wake word is heard before
     *config.max_record_seconds*, returns 0 with no output.
 
     Returns:
         0 on wake word detected or timeout; 2 on configuration/dependency error.
     """
-    _diag(config, f"listening for wake word '{config.wake_word}'...")
+    words = ", ".join(config.hotwords.words)
+    _diag(config, f"listening for wake word '{words}'...")
 
     deadline = time.monotonic() + config.max_record_seconds
     vad = WebrtcVadBackend(
@@ -548,14 +570,14 @@ def _run_wake_word(config: ListenConfig) -> int:
                     pcm[:usable], utterances, config, _pre_roll_bytes(config.pre_roll_seconds)
                 )
                 if result is not None:
-                    transcript_result, transcription_ms = result
+                    transcript_result, transcription_ms, matched_word = result
                     pcm_duration_seconds = len(pcm[:usable]) / (DEFAULT_SAMPLE_RATE * 2)
                     _record_history(
                         config,
                         transcript_result,
                         pcm_duration_seconds=pcm_duration_seconds,
                         transcription_ms=transcription_ms,
-                        wake_word=config.wake_word,
+                        wake_word=matched_word,
                     )
                     print(
                         _format_output(
@@ -583,7 +605,7 @@ CONTINUOUS_BUFFER_SECONDS: Final = 60
 
 
 def _run_wake_word_continuous(config: ListenConfig) -> int:
-    """Keep listening and print every utterance that contains the wake word.
+    """Keep listening and print every utterance that contains a wake word.
 
     Runs until ``Ctrl+C``. Unlike :func:`_run_wake_word`, this never exits
     after a detection, so it can back a resident assistant.
@@ -593,9 +615,10 @@ def _run_wake_word_continuous(config: ListenConfig) -> int:
     keeps growing. The retained tail also acts as pre-roll for the next wake
     word.
     """
+    words = ", ".join(config.hotwords.words)
     _diag(
         config,
-        f"listening continuously for '{config.wake_word}'... (Ctrl+C to stop)",
+        f"listening continuously for '{words}'... (Ctrl+C to stop)",
     )
 
     vad = WebrtcVadBackend(
@@ -631,14 +654,14 @@ def _run_wake_word_continuous(config: ListenConfig) -> int:
                         result = _transcribe_utterances(pcm, [(start, end)], config)
                         if result is None:
                             continue
-                        transcript_result, transcription_ms = result
+                        transcript_result, transcription_ms, matched_word = result
                         pcm_duration_seconds = (end - start) / (DEFAULT_SAMPLE_RATE * 2)
                         _record_history(
                             config,
                             transcript_result,
                             pcm_duration_seconds=pcm_duration_seconds,
                             transcription_ms=transcription_ms,
-                            wake_word=config.wake_word,
+                            wake_word=matched_word,
                         )
                         print(
                             _format_output(
@@ -671,16 +694,15 @@ def _transcribe_utterances(
     utterances: list[tuple[int, int]],
     config: ListenConfig,
     pre_roll_bytes: int = 0,
-) -> tuple[str, float] | None:
+) -> tuple[str, float, str] | None:
     """Transcribe each utterance and check for the wake word.
 
     When *pre_roll_bytes* > 0, the audio immediately preceding each utterance
     (up to *pre_roll_bytes*) is prepended so the wake word's lead-in is not
     lost to VAD segmentation.
 
-    Returns the transcript remainder (wake word stripped) and transcription
-    time in ms if the wake word is detected in any utterance, or ``None`` if
-    none matched.
+    Returns a tuple of (remainder, transcription_ms, matched_word) if any wake
+    word is detected in any utterance, or ``None`` if none matched.
     """
     start_time = time.monotonic()
     for start, end in utterances:
@@ -699,28 +721,15 @@ def _transcribe_utterances(
         if not transcript.strip():
             continue
 
-        if _wake_word_detected(transcript, config.wake_word):
-            remainder = _strip_wake_word(transcript, config.wake_word)
+        detected, matched_word = _wake_word_detected(transcript, config)
+        if detected and matched_word is not None:
+            remainder = _strip_wake_word(transcript, matched_word)
             transcription_ms = (time.monotonic() - start_time) * 1000
-            return remainder if remainder else "wake word detected", transcription_ms
+            return (remainder if remainder else "wake word detected",
+                    transcription_ms,
+                    matched_word)
 
     return None
-
-
-def _strip_wake_word(transcript: str, wake_word: str) -> str:
-    """Return *transcript* with the first occurrence of *wake_word* removed.
-
-    Matching is normalized; removal is done on the normalized text. Returns
-    an empty string when the wake word accounts for the entire transcript.
-    """
-    if not wake_word:
-        return transcript
-    norm_wake = _normalize_text(wake_word)
-    norm_text = _normalize_text(transcript)
-    idx = norm_text.find(norm_wake)
-    if idx < 0:
-        return transcript
-    return norm_text[idx + len(norm_wake) :].strip()
 
 
 def main() -> None:
@@ -748,7 +757,14 @@ def main() -> None:
         "--wake-word",
         default="",
         help="Wake word to listen for (e.g. 'Olá Ambrósio'). Overrides "
-        "VOICEVISION_WAKE_WORD. Empty disables wake word mode.",
+        "the first word in VOICEVISION_HOTWORDS or the default. Empty disables "
+        "wake word mode.",
+    )
+    parser.add_argument(
+        "--hotwords-file",
+        default="",
+        help="Path to JSON file with wake words (overrides VOICEVISION_HOTWORDS). "
+        "Format: {\"words\": [\"wake word 1\", \"wake word 2\"], \"threshold\": 0.5}",
     )
     parser.add_argument(
         "--pre-roll-seconds",
@@ -796,8 +812,16 @@ def main() -> None:
     config = replace(config, stt_language=args.language)
     if args.seconds > 0:
         config = replace(config, fixed_seconds=args.seconds)
+    # Handle hotwords file override
+    if args.hotwords_file:
+        config = replace(config, hotwords=load_hotwords(path=Path(args.hotwords_file)))
+    # Handle wake-word: replace first word in the list
     if args.wake_word:
-        config = replace(config, wake_word=args.wake_word)
+        new_hotwords = HotwordConfig(
+            words=[args.wake_word] + config.hotwords.words[1:],
+            threshold=config.hotwords.threshold,
+        )
+        config = replace(config, hotwords=new_hotwords)
     if args.pre_roll_seconds > 0:
         config = replace(config, pre_roll_seconds=args.pre_roll_seconds)
     if args.json:

@@ -26,6 +26,7 @@ from voicevision.errors import BackendExecutionError, BackendNotAvailableError
 from voicevision.history import HistoryStore
 from voicevision.listen import (
     FRAME_BYTES,
+    HotwordConfig,
     ListenConfig,
     ListenError,
     PreRollBuffer,
@@ -81,7 +82,8 @@ class TestLoadConfig:
         assert cfg.vad_max_utterance_ms == 30_000
         assert cfg.max_record_seconds == 60.0
         assert cfg.fixed_seconds == 0.0
-        assert cfg.wake_word == ""
+        assert cfg.hotwords.words == []
+        assert cfg.hotwords.threshold == 0.5
         assert cfg.pre_roll_seconds == 0.0
         assert cfg.quiet is False
         assert cfg.history_enabled is True
@@ -106,7 +108,8 @@ class TestLoadConfig:
         assert cfg.vad_aggressiveness == 1
         assert cfg.vad_silence_ms == 300
         assert cfg.max_record_seconds == 30.0
-        assert cfg.wake_word == "olá ambrósio"
+        assert cfg.hotwords.words == ["olá ambrósio"]
+        assert cfg.hotwords.threshold == 0.5
         assert cfg.pre_roll_seconds == 5.0
         assert cfg.quiet is True
         assert cfg.history_enabled is False
@@ -460,7 +463,7 @@ class TestListenModeJson:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     max_record_seconds=5.0,
                     json_output=True,
                 )
@@ -576,7 +579,7 @@ class TestQuietMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     max_record_seconds=0.0,
                     quiet=True,
                 )
@@ -736,7 +739,7 @@ class TestHistoryIntegration:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     max_record_seconds=5.0,
                     history_enabled=True,
                     history_file=str(history_file),
@@ -781,7 +784,7 @@ class TestContinuousMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     continuous=True,
                 )
             )
@@ -812,7 +815,7 @@ class TestContinuousMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     continuous=True,
                 )
             )
@@ -844,7 +847,7 @@ class TestContinuousMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     continuous=True,
                 )
             )
@@ -860,7 +863,7 @@ class TestContinuousMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     continuous=True,
                 )
             )
@@ -884,7 +887,7 @@ class TestContinuousMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     continuous=True,
                     quiet=True,
                 )
@@ -914,7 +917,7 @@ class TestContinuousMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     continuous=True,
                     history_enabled=True,
                     history_file=str(history_file),
@@ -951,23 +954,53 @@ class TestNormalizeText:
 
 
 class TestWakeWordDetection:
+    def _config(self, words: list[str]) -> ListenConfig:
+        return ListenConfig(
+            stt_model="/models/whisper-base.bin",
+            hotwords=HotwordConfig(words=words),
+        )
+
     def test_match_exact(self) -> None:
-        assert _wake_word_detected("olá ambrósio", "olá ambrósio") is True
+        cfg = self._config(["olá ambrósio"])
+        detected, matched = _wake_word_detected("olá ambrósio", cfg)
+        assert detected is True
+        assert matched == "olá ambrósio"
 
     def test_match_case_insensitive(self) -> None:
-        assert _wake_word_detected("OLÁ AMBRÓSIO", "olá ambrósio") is True
+        cfg = self._config(["olá ambrósio"])
+        detected, matched = _wake_word_detected("OLÁ AMBRÓSIO", cfg)
+        assert detected is True
+        assert matched == "olá ambrósio"
 
     def test_match_with_accents(self) -> None:
-        assert _wake_word_detected("ola ambrosio", "olá ambrósio") is True
+        cfg = self._config(["olá ambrósio"])
+        detected, matched = _wake_word_detected("ola ambrosio", cfg)
+        assert detected is True
+        assert matched == "olá ambrósio"
 
     def test_match_substring(self) -> None:
-        assert _wake_word_detected("olá ambrósio, como vais?", "olá ambrósio") is True
+        cfg = self._config(["olá ambrósio"])
+        detected, matched = _wake_word_detected("olá ambrósio, como vais?", cfg)
+        assert detected is True
+        assert matched == "olá ambrósio"
 
     def test_no_match(self) -> None:
-        assert _wake_word_detected("ola mundo", "olá ambrósio") is False
+        cfg = self._config(["olá ambrósio"])
+        detected, matched = _wake_word_detected("ola mundo", cfg)
+        assert detected is False
+        assert matched is None
 
     def test_empty_wake_word(self) -> None:
-        assert _wake_word_detected("qualquer coisa", "") is False
+        cfg = self._config([])
+        detected, matched = _wake_word_detected("qualquer coisa", cfg)
+        assert detected is False
+        assert matched is None
+
+    def test_multiple_wake_words(self) -> None:
+        cfg = self._config(["Olá Ambrósio", "Hey Ambrósio"])
+        detected, matched = _wake_word_detected("Hey Ambrósio, como vai?", cfg)
+        assert detected is True
+        assert matched == "Hey Ambrósio"
 
 
 class TestStripWakeWord:
@@ -1088,7 +1121,7 @@ class TestSttModelSelection:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     max_record_seconds=5.0,
                 )
             )
@@ -1113,7 +1146,7 @@ class TestSttModelSelection:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     max_record_seconds=0.0,
                 )
             )
@@ -1140,7 +1173,7 @@ class TestSttModelSelection:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     max_record_seconds=0.1,
                 )
             )
@@ -1166,7 +1199,7 @@ class TestSttModelSelection:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="",
+                    hotwords=HotwordConfig(words=[]),
                 )
             )
         assert code == 0
@@ -1193,7 +1226,7 @@ class TestPreRollWakeWordMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     pre_roll_seconds=2.0,
                     max_record_seconds=5.0,
                 )
@@ -1221,7 +1254,7 @@ class TestPreRollWakeWordMode:
             code = run(
                 ListenConfig(
                     stt_model="/models/whisper-base.bin",
-                    wake_word="olá ambrósio",
+                    hotwords=HotwordConfig(words=["olá ambrósio"]),
                     pre_roll_seconds=0.0,
                     max_record_seconds=5.0,
                 )
