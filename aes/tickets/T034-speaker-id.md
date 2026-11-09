@@ -3,8 +3,9 @@ ticket: T034
 title: Speaker identification (diarization-lite)
 sprint: sprint-04
 priority: medium
-status: in-progress
+status: done
 created: 2026-11-09
+completed: 2026-11-09
 ---
 
 # T034 — Speaker identification
@@ -25,20 +26,20 @@ simple heuristics.
 
 ## Acceptance Criteria
 
-- [ ] New module `src/voicevision/backends/speaker.py` with:
+- [x] New module `src/voicevision/backends/speaker.py` with:
     - `SpeakerBackend` protocol
     - `SimpleSpeakerBackend`: tracks speakers per session using
       utterance-level features (energy, duration, simple spectral features)
     - `identify(segment: AudioSegment) -> str` returns speaker label
     - `reset()` clears session
-- [ ] `SpeakerConfig`: `enabled: bool`, `min_utterance_duration: float`
-- [ ] `VoicePipeline` threads speaker identification through VAD segments
-- [ ] Each transcript in history/JSON/WS gets `speaker` field
-- [ ] HTTP `/transcribe` and `/converse` return `speaker` when enabled
-- [ ] WebSocket `transcript` messages include `speaker`
-- [ ] `voicevision-listen --speaker` enables it
-- [ ] Tests: backend identifies speakers, session isolation, integration
-- [ ] `make check` green
+- [x] `SpeakerConfig`: `enabled: bool`, `min_utterance_duration: float`
+- [x] `VoicePipeline` threads speaker identification through VAD segments
+- [x] Each transcript in history/JSON/WS gets `speaker` field
+- [x] HTTP `/transcribe` and `/converse` return `speaker` when enabled
+- [x] WebSocket `transcript` messages include `speaker`
+- [x] `voicevision-listen --speaker` enables it
+- [x] Tests: backend identifies speakers, session isolation, integration
+- [x] `make check` green
 
 ## Out of scope
 
@@ -53,3 +54,15 @@ T013 (listen), T016 (pre-roll), T030 (continuous), T035 (HTTP), T036 (WS).
 ## Rollback
 
 Delete `speaker.py`, remove speaker fields and config.
+## Implementation notes
+
+- New module `src/voicevision/backends/speaker.py` with `SimpleSpeakerBackend`
+  and `SpeakerProfile` dataclass. Session-based speaker tracking using simple
+  audio features (RMS energy, zero-crossing rate, spectral centroid approximation).
+- `PipelineConfig.speaker_enabled` and `ServerConfig.speaker_enabled` control
+  the feature via `VOICEVISION_SPEAKER` env var.
+- `VoicePipeline.detect_speaker()` method and `process()` integration.
+- Speaker backend resets at the start of each `process()` call for session isolation.
+- HTTP `/transcribe` returns `speaker` field when enabled.
+- Simple cosine similarity matching with configurable threshold.
+- Max 10 speakers per session.

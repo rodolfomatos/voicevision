@@ -13,6 +13,7 @@ from typing import Any, cast
 from voicevision.backends.emotion import EmotionResult, SimpleEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
 from voicevision.backends.piper import PiperBackend
+from voicevision.backends.speaker import SimpleSpeakerBackend
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
@@ -64,6 +65,9 @@ class PipelineConfig:
 
     # Emotion detection
     emotion_enabled: bool = False
+
+    # Speaker identification
+    speaker_enabled: bool = False
 
 
 class VoicePipeline:
@@ -162,6 +166,10 @@ class VoicePipeline:
         if not utterances:
             return b""
 
+        # Reset speaker backend for new session
+        if self.config.speaker_enabled:
+            SimpleSpeakerBackend().reset()
+
         # Process each utterance through the pipeline
         output_chunks = []
         for start, end in utterances:
@@ -171,6 +179,10 @@ class VoicePipeline:
             transcript = self.stt.transcribe(utterance_pcm)
             if not transcript.strip():
                 continue  # Skip empty transcripts
+
+            # Speaker identification
+            if self.config.speaker_enabled:
+                SimpleSpeakerBackend().identify(utterance_pcm)
 
             # 3. LLM: generate response with conversation context
             context = self._build_conversation_context()
@@ -211,6 +223,20 @@ class VoicePipeline:
         if not self.config.emotion_enabled:
             return None
         return SimpleEmotionBackend().detect(transcript)
+
+    def detect_speaker(self, audio: bytes, sample_rate: int = 16000) -> str | None:
+        """Identify speaker from audio if speaker identification is enabled.
+
+        Args:
+            audio: PCM16 mono audio bytes.
+            sample_rate: Sample rate in Hz.
+
+        Returns:
+            Speaker label if speaker identification is enabled, None otherwise.
+        """
+        if not self.config.speaker_enabled:
+            return None
+        return SimpleSpeakerBackend().identify(audio, sample_rate)
 
     def process_stream(self, audio_chunks: Iterator[bytes]) -> Iterator[bytes]:
         """Process a stream of audio chunks, yielding speech as it's ready.

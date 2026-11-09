@@ -42,6 +42,7 @@ from voicevision import __version__
 from voicevision.audio import pcm16_to_wav, require_whisper_format
 from voicevision.backends.emotion import SimpleEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
+from voicevision.backends.speaker import SimpleSpeakerBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
 from voicevision.errors import ConfigurationError, VoiceVisionError
@@ -130,6 +131,9 @@ class ServerConfig:
     # Emotion detection
     emotion_enabled: bool = False
 
+    # Speaker identification
+    speaker_enabled: bool = False
+
 
 def load_config() -> ServerConfig:
     """Build a :class:`ServerConfig` from environment variables.
@@ -154,6 +158,7 @@ def load_config() -> ServerConfig:
         vision_host=os.environ.get("VOICEVISION_VISION_HOST", "127.0.0.1"),
         vision_port=_env_int("VOICEVISION_VISION_PORT", 8081),
         emotion_enabled=_env_bool("VOICEVISION_EMOTION", False),
+        speaker_enabled=_env_bool("VOICEVISION_SPEAKER", False),
     )
 
 
@@ -424,6 +429,11 @@ class _RequestHandler(BaseHTTPRequestHandler):
         if self._config.emotion_enabled:
             emotion = SimpleEmotionBackend().detect(transcript)
             result["emotion"] = {"label": emotion.label, "score": emotion.score}
+
+        # Speaker identification
+        if self._config.speaker_enabled:
+            speaker = SimpleSpeakerBackend().identify(wav)
+            result["speaker"] = speaker
 
         return result
 
