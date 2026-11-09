@@ -104,6 +104,9 @@ voicevision-listen --seconds 5 --json
 
 # Automation mode: only the transcript on stdout, no progress messages
 voicevision-listen --seconds 5 --quiet
+
+# Stay resident: print every wake word utterance until Ctrl+C
+voicevision-listen --wake-word "Olá Ambrósio" --continuous
 ```
 
 ## With clipboard (for OpenCode / any editor)

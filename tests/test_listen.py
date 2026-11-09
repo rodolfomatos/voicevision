@@ -86,6 +86,7 @@ class TestLoadConfig:
         assert cfg.quiet is False
         assert cfg.history_enabled is True
         assert cfg.history_file == ""
+        assert cfg.continuous is False
 
     def test_from_env(self, monkeypatch: Any) -> None:
         monkeypatch.setenv("VOICEVISION_STT_MODEL", "/models/whisper-base.bin")
@@ -98,6 +99,7 @@ class TestLoadConfig:
         monkeypatch.setenv("VOICEVISION_QUIET", "1")
         monkeypatch.setenv("VOICEVISION_HISTORY_ENABLED", "0")
         monkeypatch.setenv("VOICEVISION_HISTORY_FILE", "/tmp/history.jsonl")
+        monkeypatch.setenv("VOICEVISION_CONTINUOUS", "1")
         cfg = load_config()
         assert cfg.stt_model == "/models/whisper-base.bin"
         assert cfg.stt_language == "pt"
@@ -109,19 +111,29 @@ class TestLoadConfig:
         assert cfg.quiet is True
         assert cfg.history_enabled is False
         assert cfg.history_file == "/tmp/history.jsonl"
+        assert cfg.continuous is True
 
 
 # -- sounddevice fake --------------------------------------------------------
 
 
-def _install_fake_sounddevice(monkeypatch: Any, frames: list[bytes]) -> None:
+def _install_fake_sounddevice(
+    monkeypatch: Any,
+    frames: list[bytes],
+    *,
+    stop_after: bool = False,
+) -> None:
     """Inject a fake sounddevice module so `import sounddevice` inside
-    `_capture_until_utterance` gets the fake instead of the real library."""
+    `_capture_until_utterance` gets the fake instead of the real library.
+
+    When *stop_after* is true, the stream raises ``KeyboardInterrupt`` once the
+    frames are exhausted — used to terminate the continuous listen loop.
+    """
 
     class FakeInputStream:
         """Context-manager stand-in for sounddevice.InputStream.
 
-        Yields one PCM frame per read(), then silence.
+        Yields one PCM frame per read(), then silence (or KeyboardInterrupt).
         """
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -139,6 +151,8 @@ def _install_fake_sounddevice(monkeypatch: Any, frames: list[bytes]) -> None:
                 frame = self._frames[self._index]
                 self._index += 1
                 return (frame, False)
+            if stop_after:
+                raise KeyboardInterrupt
             return (b"", False)
 
     fake = ModuleType("sounddevice")
@@ -735,6 +749,184 @@ class TestHistoryIntegration:
         assert entries[0].wake_word == "olá ambrósio"
 
 
+# -- continuous wake word mode -----------------------------------------------
+
+
+class TestContinuousMode:
+    """T030: keep listening and print every wake word utterance."""
+
+    def test_prints_each_detection(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        _install_fake_sounddevice(
+            monkeypatch,
+            [b"\x00" * FRAME_BYTES, b"\x00" * FRAME_BYTES],
+            stop_after=True,
+        )
+        fake_vad = FakeVadBackend(
+            utterances=[[(0, FRAME_BYTES)], [(0, FRAME_BYTES)]]
+        )
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                side_effect=[
+                    "olá ambrósio primeiro",
+                    "olá ambrósio segundo",
+                ],
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    continuous=True,
+                )
+            )
+        assert code == 0
+        out = capsys.readouterr().out.strip().splitlines()
+        assert out == ["primeiro", "segundo"]
+
+    def test_ignores_non_wake_word_utterances(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        _install_fake_sounddevice(
+            monkeypatch,
+            [b"\x00" * FRAME_BYTES, b"\x00" * FRAME_BYTES],
+            stop_after=True,
+        )
+        fake_vad = FakeVadBackend(
+            utterances=[[(0, FRAME_BYTES)], [(0, FRAME_BYTES)]]
+        )
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                side_effect=["bom dia", "olá ambrósio abre a janela"],
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    continuous=True,
+                )
+            )
+        assert code == 0
+        out = capsys.readouterr().out.strip()
+        assert out == "abre a janela"
+
+    def test_duplicate_vad_ranges_are_transcribed_once(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A VAD that reports the same range twice must not duplicate output."""
+        _install_fake_sounddevice(
+            monkeypatch,
+            [b"\x00" * FRAME_BYTES],
+            stop_after=True,
+        )
+        fake_vad = FakeVadBackend(
+            utterances=[[(0, FRAME_BYTES), (0, FRAME_BYTES)]]
+        )
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="olá ambrósio uma vez",
+            ) as transcribe,
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    continuous=True,
+                )
+            )
+        assert code == 0
+        assert transcribe.call_count == 1
+        assert capsys.readouterr().out.strip() == "uma vez"
+
+    def test_ctrl_c_returns_zero(self, monkeypatch: Any) -> None:
+        _install_fake_sounddevice(monkeypatch, [], stop_after=True)
+        with patch(
+            "voicevision.listen.WebrtcVadBackend", return_value=FakeVadBackend()
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    continuous=True,
+                )
+            )
+        assert code == 0
+
+    def test_requires_wake_word(self, capsys: Any) -> None:
+        code = run(
+            ListenConfig(
+                stt_model="/models/whisper-base.bin",
+                continuous=True,
+            )
+        )
+        assert code == 2
+        assert "requires a wake word" in capsys.readouterr().err
+
+    def test_quiet_suppresses_progress(self, monkeypatch: Any, capsys: Any) -> None:
+        _install_fake_sounddevice(monkeypatch, [], stop_after=True)
+        with patch(
+            "voicevision.listen.WebrtcVadBackend", return_value=FakeVadBackend()
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    continuous=True,
+                    quiet=True,
+                )
+            )
+        assert code == 0
+        assert capsys.readouterr().err == ""
+
+    def test_records_history(
+        self,
+        monkeypatch: Any,
+        tmp_path: Any,
+    ) -> None:
+        history_file = tmp_path / "history.jsonl"
+        _install_fake_sounddevice(
+            monkeypatch,
+            [b"\x00" * FRAME_BYTES],
+            stop_after=True,
+        )
+        fake_vad = FakeVadBackend(utterances=[[(0, FRAME_BYTES)]])
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="olá ambrósio ligue as luzes",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    continuous=True,
+                    history_enabled=True,
+                    history_file=str(history_file),
+                )
+            )
+        assert code == 0
+        entries = HistoryStore(history_file).read()
+        assert len(entries) == 1
+        assert entries[0].transcript == "ligue as luzes"
+        assert entries[0].wake_word == "olá ambrósio"
+
+
 # -- wake word ---------------------------------------------------------------
 
 
@@ -923,6 +1115,33 @@ class TestSttModelSelection:
                     stt_model="/models/whisper-base.bin",
                     wake_word="olá ambrósio",
                     max_record_seconds=0.0,
+                )
+            )
+        assert code == 0
+        captured = capsys.readouterr()
+        assert captured.out.strip() == ""
+        assert "wake word not detected" in captured.err.strip()
+
+    def test_non_matching_utterance_does_not_crash(
+        self,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """Regression: hearing speech without the wake word used to raise AssertionError."""
+        _install_fake_sounddevice(monkeypatch, [b"\x00" * FRAME_BYTES])
+        fake_vad = FakeVadBackend(utterances=[[(0, FRAME_BYTES)]])
+        with (
+            patch("voicevision.listen.WebrtcVadBackend", return_value=fake_vad),
+            patch(
+                "voicevision.listen._transcribe_pcm",
+                return_value="ola mundo",
+            ),
+        ):
+            code = run(
+                ListenConfig(
+                    stt_model="/models/whisper-base.bin",
+                    wake_word="olá ambrósio",
+                    max_record_seconds=0.1,
                 )
             )
         assert code == 0

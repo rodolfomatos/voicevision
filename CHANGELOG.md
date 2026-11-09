@@ -19,9 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.voicevision/history.jsonl` (JSON Lines, `0600`). New `voicevision-history`
   CLI lists or clears it; `--no-history` and `VOICEVISION_HISTORY_ENABLED=0`
   opt out
+- **Continuous wake word mode** (T030): `--continuous` keeps listening and
+  prints every wake word utterance until `Ctrl+C`; each detection is recorded
+  in the history with its wake word
 
 ### Fixed
 
+- Single-shot wake word mode no longer raises `AssertionError` when it hears
+  speech that does not contain the wake word (`_transcribe_utterances` now
+  returns `None` instead of a `(None, None)` tuple)
 - `tests/backends/test_vad.py` and `tests/test_vision.py` no longer depend on
   optional packages being installed or absent in the running environment
 - `make code-check` no longer scans generated `*.egg-info` directories when

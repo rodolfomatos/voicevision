@@ -136,6 +136,7 @@ class ListenConfig:
     quiet: bool = False
     history_enabled: bool = False
     history_file: str = ""
+    continuous: bool = False
 
 
 def _env_int(name: str, default: int) -> int:
@@ -221,6 +222,7 @@ def load_config() -> ListenConfig:
         quiet=_env_int("VOICEVISION_QUIET", 0) == 1,
         history_enabled=_env_bool("VOICEVISION_HISTORY_ENABLED", True),
         history_file=os.environ.get("VOICEVISION_HISTORY_FILE", ""),
+        continuous=_env_bool("VOICEVISION_CONTINUOUS", False),
     )
 
 
@@ -431,9 +433,23 @@ def run(config: ListenConfig | None = None) -> int:
         )
         return 2
 
+    if config.continuous and not config.wake_word:
+        print(
+            "error: --continuous requires a wake word (--wake-word or VOICEVISION_WAKE_WORD)",
+            file=sys.stderr,
+        )
+        return 2
+
     if config.wake_word:
+        if config.continuous:
+            return _run_wake_word_continuous(config)
         return _run_wake_word(config)
 
+    return _run_single_shot(config)
+
+
+def _run_single_shot(config: ListenConfig) -> int:
+    """Capture one utterance, transcribe it, print it, and record it."""
     try:
         if config.fixed_seconds > 0:
             pcm = _capture_fixed_seconds(config)
@@ -532,7 +548,6 @@ def _run_wake_word(config: ListenConfig) -> int:
                 )
                 if result is not None:
                     transcript_result, transcription_ms = result
-                    assert transcript_result is not None
                     pcm_duration_seconds = len(pcm[:usable]) / (DEFAULT_SAMPLE_RATE * 2)
                     _record_history(
                         config,
@@ -561,12 +576,101 @@ def _run_wake_word(config: ListenConfig) -> int:
     return 0
 
 
+#: Hard cap on the rolling buffer in continuous mode (seconds of audio).
+#: The VAD runaway guard normally closes utterances long before this.
+CONTINUOUS_BUFFER_SECONDS: Final = 60
+
+
+def _run_wake_word_continuous(config: ListenConfig) -> int:
+    """Keep listening and print every utterance that contains the wake word.
+
+    Runs until ``Ctrl+C``. Unlike :func:`_run_wake_word`, this never exits
+    after a detection, so it can back a resident assistant.
+
+    The buffer is trimmed after each pass and the processed byte offset is
+    tracked, which prevents re-transcribing an utterance while the VAD buffer
+    keeps growing. The retained tail also acts as pre-roll for the next wake
+    word.
+    """
+    _diag(
+        config,
+        f"listening continuously for '{config.wake_word}'... (Ctrl+C to stop)",
+    )
+
+    vad = WebrtcVadBackend(
+        aggressiveness=config.vad_aggressiveness,
+        sample_rate=DEFAULT_SAMPLE_RATE,
+        silence_ms=config.vad_silence_ms,
+        max_utterance_ms=config.vad_max_utterance_ms,
+    )
+    max_buffer_bytes = CONTINUOUS_BUFFER_SECONDS * DEFAULT_SAMPLE_RATE * 2
+    buffer = bytearray()
+    processed = 0
+
+    try:
+        import sounddevice as sd  # noqa: PLC0415 - lazy import per CLAUDE.md
+
+        with sd.InputStream(
+            samplerate=DEFAULT_SAMPLE_RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=FRAME_BYTES,
+        ) as stream:
+            while True:
+                data, _overflowed = stream.read(FRAME_BYTES)
+                buffer.extend(bytes(data))
+
+                usable = len(buffer) - (len(buffer) % FRAME_BYTES)
+                if usable >= FRAME_BYTES:
+                    pcm = bytes(buffer[:usable])
+                    for start, end in vad.segment(pcm):
+                        if end <= processed:
+                            continue
+                        processed = end
+                        result = _transcribe_utterances(pcm, [(start, end)], config)
+                        if result is None:
+                            continue
+                        transcript_result, transcription_ms = result
+                        pcm_duration_seconds = (end - start) / (DEFAULT_SAMPLE_RATE * 2)
+                        _record_history(
+                            config,
+                            transcript_result,
+                            pcm_duration_seconds=pcm_duration_seconds,
+                            transcription_ms=transcription_ms,
+                            wake_word=config.wake_word,
+                        )
+                        print(
+                            _format_output(
+                                transcript_result,
+                                config,
+                                pcm_duration_seconds=pcm_duration_seconds,
+                                transcription_ms=transcription_ms,
+                                wake_word_detected=True,
+                            )
+                        )
+
+                if processed:
+                    del buffer[:processed]
+                    processed = 0
+
+                if len(buffer) > max_buffer_bytes:
+                    del buffer[:-max_buffer_bytes]
+
+    except KeyboardInterrupt:
+        _diag(config, "stopped")
+        return 0
+    except ListenError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print("  install: pip install voicevision[audio]", file=sys.stderr)
+        return 2
+
+
 def _transcribe_utterances(
     pcm: bytes,
     utterances: list[tuple[int, int]],
     config: ListenConfig,
     pre_roll_bytes: int = 0,
-) -> tuple[str | None, float | None]:
+) -> tuple[str, float] | None:
     """Transcribe each utterance and check for the wake word.
 
     When *pre_roll_bytes* > 0, the audio immediately preceding each utterance
@@ -574,8 +678,8 @@ def _transcribe_utterances(
     lost to VAD segmentation.
 
     Returns the transcript remainder (wake word stripped) and transcription
-    time in ms if the wake word is detected in any utterance, or (None, None)
-    if none matched.
+    time in ms if the wake word is detected in any utterance, or ``None`` if
+    none matched.
     """
     start_time = time.monotonic()
     for start, end in utterances:
@@ -599,7 +703,7 @@ def _transcribe_utterances(
             transcription_ms = (time.monotonic() - start_time) * 1000
             return remainder if remainder else "wake word detected", transcription_ms
 
-    return None, None
+    return None
 
 
 def _strip_wake_word(transcript: str, wake_word: str) -> str:
@@ -653,6 +757,13 @@ def main() -> None:
         "word mode is active (e.g. --pre-roll-seconds 2). Default: 0.",
     )
     parser.add_argument(
+        "--continuous",
+        action="store_true",
+        default=False,
+        help="Keep listening and print every wake word utterance until Ctrl+C "
+        "(requires --wake-word)",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         default=False,
@@ -696,6 +807,8 @@ def main() -> None:
         config = replace(config, history_enabled=False)
     if args.history_file:
         config = replace(config, history_file=args.history_file)
+    if args.continuous:
+        config = replace(config, continuous=True)
 
     sys.exit(run(config))
 

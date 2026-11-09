@@ -223,6 +223,7 @@ overridden per-invocation. Prefix: `VOICEVISION_`.
 | `VOICEVISION_QUIET` | `0` | `1` suppresses progress/outcome messages on stderr (fatal errors still reported) |
 | `VOICEVISION_HISTORY_ENABLED` | `1` | `0` disables transcript persistence |
 | `VOICEVISION_HISTORY_FILE` | `~/.voicevision/history.jsonl` | Transcript history file (JSON Lines) |
+| `VOICEVISION_CONTINUOUS` | `0` | `1` keeps listening for the wake word until interrupted |
 
 ### Example: English language, 3-second silence threshold
 
@@ -295,6 +296,7 @@ voicevision-listen
 | `--quiet` | Suppress progress/outcome messages on stderr; fatal errors are still reported |
 | `--no-history` | Do not append this transcript to the history file |
 | `--history-file PATH` | Override the history file path |
+| `--continuous` | Keep listening and print every wake word utterance until `Ctrl+C` (requires `--wake-word`) |
 
 ---
 
