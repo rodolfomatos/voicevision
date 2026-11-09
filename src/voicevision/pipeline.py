@@ -58,6 +58,9 @@ class PipelineConfig:
     # Streaming
     streaming_enabled: bool = False
 
+    # Mute TTS
+    mute_tts: bool = False
+
 
 class VoicePipeline:
     """End-to-end voice pipeline: audio in -> audio out."""
@@ -181,8 +184,9 @@ class VoicePipeline:
             # 5. Store in conversation history
             self._conversation_history.append((transcript, response_text))
 
-            # 6. TTS: synthesize response
-            output_chunks.append(self.tts.synthesize(response_text))
+            # 6. TTS: synthesize response (unless muted)
+            if not self.config.mute_tts:
+                output_chunks.append(self.tts.synthesize(response_text))
 
         # Concatenate all speech chunks
         return b"".join(output_chunks)
@@ -243,9 +247,9 @@ class VoicePipeline:
                 # Filter thinking traces from accumulated text
                 if self.config.enable_thinking_filter:
                     filtered = self._filter_thinking(full_response)
-                    if filtered.strip():
+                    if filtered.strip() and not self.config.mute_tts:
                         yield self.tts.synthesize(filtered)
-                else:
+                elif not self.config.mute_tts:
                     yield self.tts.synthesize(chunk)
 
         # Store in conversation history
@@ -267,8 +271,9 @@ class VoicePipeline:
         # Store in conversation history
         self._conversation_history.append((transcript, response_text))
 
-        # TTS: synthesize response
-        yield self.tts.synthesize(response_text)
+        # TTS: synthesize response (unless muted)
+        if not self.config.mute_tts:
+            yield self.tts.synthesize(response_text)
 
     def describe_and_answer(
         self,
@@ -309,8 +314,10 @@ class VoicePipeline:
             if not response_text.strip():
                 return b""
 
-            # 4. TTS: synthesize the response
-            return self.tts.synthesize(response_text)
+            # 4. TTS: synthesize the response (unless muted)
+            if not self.config.mute_tts:
+                return self.tts.synthesize(response_text)
+            return b""
 
         # 2b. No LLM configured: return description as text (no TTS)
         return description.encode("utf-8")

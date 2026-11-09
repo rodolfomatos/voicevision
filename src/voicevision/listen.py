@@ -139,6 +139,7 @@ class ListenConfig:
     history_enabled: bool = False
     history_file: str = ""
     continuous: bool = False
+    mute_tts: bool = False
 
 
 def _env_int(name: str, default: int) -> int:
@@ -222,7 +223,8 @@ def load_config() -> ListenConfig:
     ``VOICEVISION_VAD_AGGRESSIVENESS``, ``VOICEVISION_VAD_SILENCE_MS``,
     ``VOICEVISION_VAD_MAX_UTTERANCE_MS``,
     ``VOICEVISION_MAX_RECORD_SECONDS``, ``VOICEVISION_WAKE_WORD`` (legacy),
-    ``VOICEVISION_HOTWORDS`` and ``VOICEVISION_PRE_ROLL_SECONDS``.
+    ``VOICEVISION_HOTWORDS``, ``VOICEVISION_PRE_ROLL_SECONDS`` and
+    ``VOICEVISION_MUTE_TTS``.
     """
     hotwords = load_hotwords()
     # Backward compatibility: VOICEVISION_WAKE_WORD overrides the first word
@@ -245,6 +247,7 @@ def load_config() -> ListenConfig:
         history_enabled=_env_bool("VOICEVISION_HISTORY_ENABLED", True),
         history_file=os.environ.get("VOICEVISION_HISTORY_FILE", ""),
         continuous=_env_bool("VOICEVISION_CONTINUOUS", False),
+        mute_tts=_env_bool("VOICEVISION_MUTE_TTS", False),
     )
 
 
@@ -794,6 +797,13 @@ def main() -> None:
         "(fatal errors are still reported)",
     )
     parser.add_argument(
+        "--mute",
+        action="store_true",
+        default=False,
+        help="Run the full pipeline but suppress TTS output "
+        "(useful for testing or chaining with another TTS)",
+    )
+    parser.add_argument(
         "--no-history",
         action="store_true",
         default=False,
@@ -828,6 +838,8 @@ def main() -> None:
         config = replace(config, json_output=True)
     if args.quiet:
         config = replace(config, quiet=True)
+    if args.mute:
+        config = replace(config, mute_tts=True)
     if args.no_history:
         config = replace(config, history_enabled=False)
     if args.history_file:
