@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Continuous wake word mode** (T030): `--continuous` keeps listening and
   prints every wake word utterance until `Ctrl+C`; each detection is recorded
   in the history with its wake word
+- **Local HTTP server** (T035): new `voicevision-server` command exposing
+  `GET /health`, `POST /transcribe`, `POST /describe` and `POST /converse` as
+  JSON. Standard library only, binds `127.0.0.1` by default, optional bearer
+  auth via `VOICEVISION_SERVER_TOKEN`, 10 MiB body cap
 
 ### Fixed
 
@@ -37,8 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- `README.md` and `docs/VOICE_INPUT.md` document `--json`, `--quiet`, and
-  `VOICEVISION_QUIET`
+- `README.md` and `docs/VOICE_INPUT.md` document `--json`, `--quiet`,
+  `VOICEVISION_QUIET`, and the local HTTP server
+- `CLAUDE.md` non-goals updated: the optional HTTP server is localhost-only by
+  default, and history is opt-in rather than forbidden
 
 ## [0.2.2] - 2026-11-07
 

@@ -224,6 +224,9 @@ overridden per-invocation. Prefix: `VOICEVISION_`.
 | `VOICEVISION_HISTORY_ENABLED` | `1` | `0` disables transcript persistence |
 | `VOICEVISION_HISTORY_FILE` | `~/.voicevision/history.jsonl` | Transcript history file (JSON Lines) |
 | `VOICEVISION_CONTINUOUS` | `0` | `1` keeps listening for the wake word until interrupted |
+| `VOICEVISION_SERVER_HOST` | `127.0.0.1` | Bind address for `voicevision-server` (loopback only by default) |
+| `VOICEVISION_SERVER_PORT` | `8765` | Bind port for `voicevision-server` |
+| `VOICEVISION_SERVER_TOKEN` | *(empty)* | When set, require `Authorization: Bearer <token>` |
 
 ### Example: English language, 3-second silence threshold
 
@@ -297,6 +300,29 @@ voicevision-listen
 | `--no-history` | Do not append this transcript to the history file |
 | `--history-file PATH` | Override the history file path |
 | `--continuous` | Keep listening and print every wake word utterance until `Ctrl+C` (requires `--wake-word`) |
+
+---
+
+## Programmatic Access (local HTTP server)
+
+Editor plugins and other processes can reuse the same STT backend without
+shelling out to the CLI:
+
+```bash
+voicevision-server                 # 127.0.0.1:8765, no auth
+VOICEVISION_SERVER_TOKEN=secret voicevision-server --port 9000
+```
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /health` | Liveness probe and version |
+| `POST /transcribe` | `{"audio_base64", "language"}` → transcript + latency |
+| `POST /describe` | `{"image_base64", "question"}` → image description |
+| `POST /converse` | `{"text", "max_tokens"}` → LLM answer |
+
+The server uses only the standard library, binds to localhost by default, and
+never contacts a cloud service. See the README section "Local HTTP server" for
+request/response examples and the full error contract.
 
 ---
 

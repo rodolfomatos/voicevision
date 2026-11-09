@@ -76,6 +76,7 @@ dev = [
 voicevision-preflight = "voicevision.preflight:main"
 voicevision-listen = "voicevision.listen:main"
 voicevision-history = "voicevision.history:main"
+voicevision-server = "voicevision.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -100,7 +101,7 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "C9", "SIM", "T20", "PTH", "ERA",
 ignore = ["S101", "ARG001", "ARG002"]
 # preflight is a CLI: printing findings to stdout is its entire job.
 # T201 no-print, ARG005 lambda used only for its side effect.
-per-file-ignores = { "src/voicevision/preflight.py" = ["T201"], "src/voicevision/listen.py" = ["T201"], "src/voicevision/history.py" = ["T201"] }
+per-file-ignores = { "src/voicevision/preflight.py" = ["T201"], "src/voicevision/listen.py" = ["T201"], "src/voicevision/history.py" = ["T201"], "src/voicevision/server.py" = ["T201"] }
 
 [tool.ruff.format]
 quote-style = "double"

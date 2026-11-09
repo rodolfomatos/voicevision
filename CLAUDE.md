@@ -23,9 +23,11 @@ into this process). Read both before changing anything about backends.
 - Training or fine-tuning models — inference only
 - A GUI or user-facing application — this is a library
 - Downloading or managing models — operators install them and supply paths
-- Serving over the network — no HTTP/gRPC surface of our own
+- Serving beyond localhost — the optional HTTP server binds `127.0.0.1` by
+  default; exposing it on a network is an explicit operator decision (T035)
 - Cloud APIs — local-first and fully offline at runtime
-- Conversation memory or history — the caller owns context
+- Persistent memory owned by the library — the caller owns conversation
+  context; the CLI records transcripts locally only when history is enabled
 - **Android / Termux / ChaQuopy** — out of scope for v0.1 by operator decision.
   Reopening this is a new project, not a ticket.
 - Vision and camera in v0.1 — deferred to v0.2

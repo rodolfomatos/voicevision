@@ -6,8 +6,42 @@
 
 `voicevision` is a reusable Python component — a "lego brick" — for offline
 multimodal AI on the edge. It is a library, not an application: the caller owns
-context, models, and audio devices. Everything runs locally, with no cloud API,
-no HTTP/gRPC surface of our own, and no model runtime linked into this process.
+context, models, and audio devices. Everything runs locally, with no cloud API.
+An optional HTTP server binds to `127.0.0.1` only, and no model runtime is
+linked into this process.
+
+---
+
+# 🐧 Linux Mint + OpenCode: speak instead of typing
+
+The shortest path from a fresh Linux Mint install to dictating into OpenCode:
+
+```bash
+# 1. Clone and install (Python 3.10+; use the venv if your distro blocks pip)
+git clone https://github.com/rodolfomatos/voicevision.git
+cd voicevision
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 2. Install whisper.cpp, llama.cpp, piper, xclip and the clipboard wrapper
+make install-voice-input
+
+# 3. Download the STT model (see "Download models" below for the rest)
+curl -L -o /models/whisper-base.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+
+# 4. Point voicevision at the model
+export VOICEVISION_STT_MODEL=/models/whisper-base.bin
+export VOICEVISION_STT_LANGUAGE=pt
+
+# 5. Dictate: records, transcribes, copies to the clipboard
+voicevision-listen-and-copy
+```
+
+Paste with `Ctrl+V` in OpenCode. Bind `voicevision-listen-and-copy` to a key in
+**System Settings → Keyboard → Shortcuts → Custom Shortcuts** (for example
+`F9`) and the whole loop becomes one keypress. See
+[`docs/VOICE_INPUT.md`](docs/VOICE_INPUT.md) for the OpenCode-specific setup.
 
 ---
 
@@ -150,6 +184,44 @@ See `docs/VOICE_INPUT.md` for full documentation.
 
 ---
 
+# 🌐 Local HTTP server
+
+Editor plugins, Home Assistant and other processes can call voicevision over a
+small localhost HTTP API instead of importing Python internals.
+
+```bash
+# Start on 127.0.0.1:8765 (default)
+voicevision-server
+
+# Different port, bearer auth required
+VOICEVISION_SERVER_TOKEN=change-me voicevision-server --port 9000
+
+# Only use --host when you really mean to expose it
+voicevision-server --host 0.0.0.0 --token change-me
+```
+
+| Endpoint | Request | Response |
+|----------|---------|----------|
+| `GET /health` | — | `{"status": "ok", "version": "0.1.0"}` |
+| `POST /transcribe` | `{"audio_base64": "...", "language": "pt"}` | `{"transcript", "language", "transcription_ms"}` |
+| `POST /describe` | `{"image_base64": "...", "question": "What is this?"}` | `{"description"}` |
+| `POST /converse` | `{"text": "...", "max_tokens": 128}` | `{"response"}` |
+
+Audio may be raw 16 kHz mono PCM16 or a WAV file. Errors are JSON
+(`{"error": "..."}`) with 400 for bad requests, 401 for a missing/wrong bearer
+token, 404/405 for routing mistakes, 413 above 10 MiB, and 502 when a backend
+fails.
+
+```bash
+# Example: transcribe a WAV file
+base64 -w0 speech.wav > /tmp/audio.b64
+curl -s http://127.0.0.1:8765/transcribe \
+  -H 'Content-Type: application/json' \
+  -d "{\"audio_base64\": \"$(cat /tmp/audio.b64)\", \"language\": \"pt\"}"
+```
+
+---
+
 # 📦 Project Documentation
 
 | File | Description |
@@ -190,6 +262,7 @@ voicevision/
 │   │   └── dummy.py               # Dummy backends for testing
 │   ├── listen.py                # Listen-only mode
 │   ├── pipeline.py              # VoicePipeline: audio → audio
+│   ├── server.py                # Local HTTP API (/health, /transcribe, …)
 │   ├── preflight.py             # Deployment diagnostics
 │   ├── audio.py                 # WAV helpers
 │   └── errors.py                # Error classes
@@ -289,6 +362,7 @@ MIT. See `LICENSE`.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| Unreleased | 2026-11-09 | JSON/quiet output, transcript history, continuous wake word, local HTTP server |
 | 0.2.1 | 2026-11-07 | Makefile with voicevision-specific targets; docs fixes |
 | 0.2.0 | 2026-11-07 | Vision backends (OpenCV + Playwright), MoondreamBackend, describe_and_answer(), conversation memory, streaming LLM → TTS |
 | 0.1.1 | 2026-11-07 | Fix env-dependent tests, add vision example to README |

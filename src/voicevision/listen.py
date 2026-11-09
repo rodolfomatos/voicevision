@@ -6,8 +6,9 @@ whisper.cpp, and prints the transcript to stdout. No LLM, no TTS — just
 speech in, text out.
 
 Designed to be invoked by an editor keybind (e.g. OpenCode) so the user can
-speak instead of typing. Audio never leaves the local machine — no HTTP or
-WebSocket surface, per the CLAUDE.md non-goal on network serving.
+speak instead of typing. This module itself never touches the network; audio
+is captured and transcribed locally. The separate ``voicevision.server`` module
+offers an opt-in localhost HTTP interface for other processes.
 
 All heavy dependencies (sounddevice, webrtcvad, whisper.cpp) are probed
 lazily so `import voicevision.listen` stays cheap and fails with a clear
