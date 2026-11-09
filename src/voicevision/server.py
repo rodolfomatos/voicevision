@@ -31,6 +31,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +44,18 @@ from voicevision.backends.llama_cpp import LlamaCppBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
 from voicevision.errors import ConfigurationError, VoiceVisionError
+from voicevision.websocket import (
+    CLOSE_INVALID_DATA,
+    CLOSE_UNSUPPORTED,
+    OPCODE_CLOSE,
+    OPCODE_PING,
+    OPCODE_PONG,
+    OPCODE_TEXT,
+    WebSocketClosed,
+    WebSocketConnection,
+    WebSocketProtocolError,
+    accept_key,
+)
 
 #: Loopback only unless the operator says otherwise.
 DEFAULT_HOST: Final = "127.0.0.1"
@@ -60,6 +73,7 @@ MAX_TOKENS_LIMIT: Final = 8192
 #: Paths that exist, mapped to the methods they accept.
 _ROUTES: Final = {
     "/health": "GET",
+    "/stream": "GET",
     "/transcribe": "POST",
     "/describe": "POST",
     "/converse": "POST",
@@ -247,6 +261,18 @@ class VoiceVisionService:
         completion = self._llm.complete(text, max_tokens=max_tokens)
         return completion.content
 
+    def converse_stream(self, text: str, max_tokens: int) -> Iterator[str]:
+        """Yield the LLM's answer in chunks, without the reasoning trace."""
+        if not self.config.llm_model:
+            raise ConfigurationError("VOICEVISION_LLM_MODEL is not set — cannot answer text")
+        if self._llm is None:
+            self._llm = LlamaCppBackend(
+                model=self.config.llm_model,
+                host=self.config.llm_host,
+                port=self.config.llm_port,
+            )
+        yield from self._llm.complete_stream(text, max_tokens=max_tokens)
+
     def close(self) -> None:
         """Release every backend that holds resources.
 
@@ -297,6 +323,9 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - name required by BaseHTTPRequestHandler
         path = urlsplit(self.path).path
+        if path == "/stream":
+            self._handle_stream()
+            return
         if path != "/health":
             self._reject_route(path, "GET")
             return
@@ -394,6 +423,182 @@ class _RequestHandler(BaseHTTPRequestHandler):
             )
         response = self._app.converse(text, max_tokens)
         return {"response": response}
+
+    # -- WebSocket streaming ----------------------------------------------
+
+    def _handle_stream(self) -> None:
+        """Validate the upgrade, then hand the socket to the streaming loop."""
+        if not self._check_auth():
+            return
+
+        upgrade = self.headers.get("Upgrade", "").lower()
+        connection = self.headers.get("Connection", "").lower()
+        if "websocket" not in upgrade or "upgrade" not in connection:
+            self._send_error(
+                HTTPStatus.BAD_REQUEST,
+                "expected a WebSocket upgrade",
+            )
+            return
+
+        if self.headers.get("Sec-WebSocket-Version", "") != "13":
+            self._send_error(
+                HTTPStatus.UPGRADE_REQUIRED,
+                "unsupported WebSocket version",
+                headers={"Sec-WebSocket-Version": "13"},
+            )
+            return
+
+        key = self.headers.get("Sec-WebSocket-Key")
+        if not key:
+            self._send_error(
+                HTTPStatus.BAD_REQUEST,
+                "missing Sec-WebSocket-Key",
+            )
+            return
+
+        self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept_key(key))
+        self.end_headers()
+        self.close_connection = True
+
+        self._stream_loop(WebSocketConnection(self.rfile, self.wfile))
+
+    def _stream_loop(self, ws: WebSocketConnection) -> None:
+        """Consume JSON frames until the peer closes or violates the protocol."""
+        audio = bytearray()
+        language = self._config.stt_language
+        try:
+            while True:
+                frame = ws.recv()
+                if frame.opcode == OPCODE_CLOSE:
+                    ws.close()
+                    return
+                if frame.opcode == OPCODE_PING:
+                    ws.pong(frame.payload)
+                    continue
+                if frame.opcode == OPCODE_PONG:
+                    continue
+                if frame.opcode != OPCODE_TEXT:
+                    ws.close(CLOSE_UNSUPPORTED, "only text frames are supported")
+                    return
+
+                keep_open, language = self._handle_stream_text(
+                    ws,
+                    frame.payload,
+                    audio,
+                    language,
+                )
+                if not keep_open:
+                    return
+        except WebSocketClosed:
+            return
+        except WebSocketProtocolError as exc:
+            ws.close(exc.code, exc.reason)
+        except OSError:
+            return
+
+    def _handle_stream_text(
+        self,
+        ws: WebSocketConnection,
+        payload: bytes,
+        audio: bytearray,
+        language: str,
+    ) -> tuple[bool, str]:
+        """Handle one text frame. Returns (keep_open, current_language)."""
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            ws.close(CLOSE_INVALID_DATA, "invalid UTF-8")
+            return False, language
+
+        try:
+            message = json.loads(text)
+        except json.JSONDecodeError:
+            self._ws_error(ws, "malformed JSON")
+            return True, language
+        if not isinstance(message, dict):
+            self._ws_error(ws, "message must be a JSON object")
+            return True, language
+
+        message_type = message.get("type")
+        if message_type == "audio":
+            requested = self._handle_stream_audio(ws, message, audio)
+            return True, requested if requested is not None else language
+        if message_type == "reset":
+            audio.clear()
+            return True, language
+        if message_type == "end":
+            self._ws_finish(ws, bytes(audio), language)
+            audio.clear()
+            return True, language
+
+        self._ws_error(ws, f"unknown message type: {message_type!r}")
+        return True, language
+
+    def _handle_stream_audio(
+        self,
+        ws: WebSocketConnection,
+        message: dict[str, Any],
+        audio: bytearray,
+    ) -> str | None:
+        """Append one audio chunk; return a language override if present."""
+        try:
+            chunk = _decode_base64(message, "audio_base64")
+        except _BadRequest as exc:
+            self._ws_error(ws, exc.message)
+            return None
+        if len(audio) + len(chunk) > self._config.max_body_bytes:
+            audio.clear()
+            self._ws_error(
+                ws,
+                f"buffered audio exceeds {self._config.max_body_bytes} bytes",
+            )
+            return None
+        audio.extend(chunk)
+        requested_language = message.get("language")
+        if isinstance(requested_language, str) and requested_language.strip():
+            return requested_language
+        return None
+
+    def _ws_finish(
+        self,
+        ws: WebSocketConnection,
+        audio: bytes,
+        language: str,
+    ) -> None:
+        """Transcribe buffered audio, then stream the LLM answer as tokens."""
+        if not audio:
+            self._ws_error(ws, "no audio received")
+            return
+        try:
+            wav = _normalise_audio(audio)
+            transcript, elapsed_ms = self._app.transcribe(wav, language)
+            ws.send_json(
+                {
+                    "type": "transcript",
+                    "transcript": transcript,
+                    "language": language,
+                    "transcription_ms": round(elapsed_ms, 3),
+                }
+            )
+            for chunk in self._app.converse_stream(transcript, self._config.llm_max_tokens):
+                if chunk:
+                    ws.send_json({"type": "token", "text": chunk})
+            ws.send_json({"type": "done"})
+        except _BadRequest as exc:
+            self._ws_error(ws, exc.message)
+        except ConfigurationError as exc:
+            self._ws_error(ws, str(exc))
+        except VoiceVisionError as exc:
+            self._ws_error(ws, str(exc))
+        except Exception as exc:  # noqa: BLE001 - report, do not kill the socket
+            self._ws_error(ws, f"internal error: {exc}")
+
+    @staticmethod
+    def _ws_error(ws: WebSocketConnection, message: str) -> None:
+        ws.send_json({"type": "error", "error": message})
 
     # -- request plumbing -------------------------------------------------
 

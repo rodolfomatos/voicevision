@@ -206,11 +206,36 @@ voicevision-server --host 0.0.0.0 --token change-me
 | `POST /transcribe` | `{"audio_base64": "...", "language": "pt"}` | `{"transcript", "language", "transcription_ms"}` |
 | `POST /describe` | `{"image_base64": "...", "question": "What is this?"}` | `{"description"}` |
 | `POST /converse` | `{"text": "...", "max_tokens": 128}` | `{"response"}` |
+| `GET /stream` | WebSocket upgrade | Streaming JSON messages |
 
 Audio may be raw 16 kHz mono PCM16 or a WAV file. Errors are JSON
 (`{"error": "..."}`) with 400 for bad requests, 401 for a missing/wrong bearer
 token, 404/405 for routing mistakes, 413 above 10 MiB, and 502 when a backend
 fails.
+
+## WebSocket streaming
+
+`/stream` avoids buffering a whole utterance in the client. Send masked text
+frames containing JSON, and read JSON frames back:
+
+```jsonc
+// client → server
+{"type": "audio", "audio_base64": "...", "language": "pt"}
+{"type": "audio", "audio_base64": "..."}
+{"type": "end"}
+
+// server → client
+{"type": "transcript", "transcript": "...", "language": "pt", "transcription_ms": 42.1}
+{"type": "token", "text": "Hello"}
+{"type": "token", "text": " world"}
+{"type": "done"}
+```
+
+`{"type": "reset"}` discards buffered audio. Malformed JSON and backend
+failures return `{"type": "error", "error": "..."}` without dropping the
+socket; protocol violations close it with the RFC 6455 code (1002 unmasked,
+1003 fragmented/binary, 1007 invalid UTF-8, 1009 oversized frame). The codec
+is implemented with the standard library — no extra dependency.
 
 ```bash
 # Example: transcribe a WAV file
@@ -263,6 +288,7 @@ voicevision/
 │   ├── listen.py                # Listen-only mode
 │   ├── pipeline.py              # VoicePipeline: audio → audio
 │   ├── server.py                # Local HTTP API (/health, /transcribe, …)
+│   ├── websocket.py             # Minimal RFC 6455 codec for /stream
 │   ├── preflight.py             # Deployment diagnostics
 │   ├── audio.py                 # WAV helpers
 │   └── errors.py                # Error classes

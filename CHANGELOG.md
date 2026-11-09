@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GET /health`, `POST /transcribe`, `POST /describe` and `POST /converse` as
   JSON. Standard library only, binds `127.0.0.1` by default, optional bearer
   auth via `VOICEVISION_SERVER_TOKEN`, 10 MiB body cap
+- **WebSocket streaming** (T036): `GET /stream` accepts `audio` frames and
+  streams `transcript` → `token` → `done`, plus `reset`, ping/pong and close.
+  Minimal RFC 6455 codec in `voicevision.websocket` with no new dependency;
+  unmasked/fragmented/oversized frames close with the RFC code
 
 ### Fixed
 

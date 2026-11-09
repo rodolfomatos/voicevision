@@ -319,10 +319,12 @@ VOICEVISION_SERVER_TOKEN=secret voicevision-server --port 9000
 | `POST /transcribe` | `{"audio_base64", "language"}` → transcript + latency |
 | `POST /describe` | `{"image_base64", "question"}` → image description |
 | `POST /converse` | `{"text", "max_tokens"}` → LLM answer |
+| `GET /stream` | WebSocket: send `audio` frames, receive `transcript` → `token` → `done` |
 
 The server uses only the standard library, binds to localhost by default, and
 never contacts a cloud service. See the README section "Local HTTP server" for
-request/response examples and the full error contract.
+request/response examples, the WebSocket message protocol, and the full error
+contract.
 
 ---
 
