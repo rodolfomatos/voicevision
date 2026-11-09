@@ -1,0 +1,59 @@
+converse:
+  name: Ask voicevision
+  description: Send text to the local LLM and fire voicevision_response with the answer.
+  fields:
+    text:
+      name: Text
+      description: The question or instruction.
+      required: true
+      example: "Summarise the state of the house."
+      selector:
+        text:
+    max_tokens:
+      name: Maximum tokens
+      description: Upper bound on the answer length.
+      required: false
+      default: 512
+      selector:
+        number:
+          min: 1
+          max: 8192
+          mode: box
+
+transcribe:
+  name: Transcribe audio
+  description: Transcribe a WAV file with the local whisper.cpp model.
+  fields:
+    audio_file:
+      name: Audio file
+      description: Absolute path to a 16 kHz mono WAV file on the Home Assistant host.
+      required: true
+      example: "/media/voicevision/note.wav"
+      selector:
+        text:
+    language:
+      name: Language
+      description: Language code; defaults to the server configuration.
+      required: false
+      example: "pt"
+      selector:
+        text:
+
+describe:
+  name: Describe an image
+  description: Ask the local vision model about an image file.
+  fields:
+    image_file:
+      name: Image file
+      description: Absolute path to an image file on the Home Assistant host.
+      required: true
+      example: "/media/voicevision/door.jpg"
+      selector:
+        text:
+    question:
+      name: Question
+      description: What to ask about the image.
+      required: false
+      example: "Is there a person at the door?"
+      selector:
+        text:

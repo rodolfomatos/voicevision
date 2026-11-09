@@ -237,6 +237,42 @@ socket; protocol violations close it with the RFC 6455 code (1002 unmasked,
 1003 fragmented/binary, 1007 invalid UTF-8, 1009 oversized frame). The codec
 is implemented with the standard library — no extra dependency.
 
+## Python client
+
+`voicevision.client` wraps the same API for Python callers (standard library
+only):
+
+```python
+from voicevision.client import VoiceVisionClient
+
+client = VoiceVisionClient("http://127.0.0.1:8765")
+print(client.health())
+
+print(client.transcribe(audio_bytes, language="pt")["transcript"])
+print(client.converse("Explain VAD in one sentence.")["response"])
+
+for message in client.stream([chunk1, chunk2], language="pt"):
+    if message["type"] == "token":
+        print(message["text"], end="", flush=True)
+```
+
+Every failure raises `VoiceVisionClientError` carrying the server's own error
+message.
+
+## Integrations
+
+Ready-to-use clients live in [`integrations/`](integrations/):
+
+| Integration | Path | Talks to |
+|-------------|------|----------|
+| Home Assistant | `integrations/homeassistant/` | HTTP via `voicevision.client` |
+| VS Code | `integrations/vscode/` | HTTP `/transcribe` |
+| Obsidian | `integrations/obsidian/` | HTTP `/transcribe`, `/converse` |
+| Notion | `integrations/notion/` | HTTP via `voicevision.client` |
+
+Each directory has its own README with installation and usage instructions.
+
+
 ```bash
 # Example: transcribe a WAV file
 base64 -w0 speech.wav > /tmp/audio.b64
@@ -288,6 +324,7 @@ voicevision/
 │   ├── listen.py                # Listen-only mode
 │   ├── pipeline.py              # VoicePipeline: audio → audio
 │   ├── server.py                # Local HTTP API (/health, /transcribe, …)
+│   ├── client.py                # Stdlib client for the local API
 │   ├── websocket.py             # Minimal RFC 6455 codec for /stream
 │   ├── preflight.py             # Deployment diagnostics
 │   ├── audio.py                 # WAV helpers

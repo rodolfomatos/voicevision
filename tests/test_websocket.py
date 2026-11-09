@@ -32,10 +32,12 @@ from voicevision.websocket import (
     OPCODE_PONG,
     OPCODE_TEXT,
     WebSocketClosed,
+    WebSocketConnection,
     WebSocketProtocolError,
     accept_key,
     encode_close,
     encode_frame,
+    encode_masked_frame,
     read_frame,
 )
 
@@ -67,6 +69,63 @@ def _masked_frame(
 class TestAcceptKey:
     def test_rfc6455_example(self) -> None:
         assert accept_key("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+
+
+class TestClientCodec:
+    """The client side masks outgoing frames and reads unmasked server frames."""
+
+    def test_masked_frame_sets_mask_bit_and_roundtrips(self) -> None:
+        encoded = encode_masked_frame(b"hello", mask=b"\x01\x02\x03\x04")
+        assert encoded[1] & 0x80
+        frame = read_frame(io.BytesIO(encoded), require_mask=True)
+        assert frame.payload == b"hello"
+
+    def test_masked_frame_generates_random_mask(self) -> None:
+        first = encode_masked_frame(b"hello")
+        second = encode_masked_frame(b"hello")
+        assert first[1] & 0x80
+        assert first != second  # different random masks
+
+    def test_mask_must_be_four_bytes(self) -> None:
+        with pytest.raises(ValueError, match="4 bytes"):
+            encode_masked_frame(b"hello", mask=b"\x01")
+
+    def test_unmasked_server_frame_is_accepted(self) -> None:
+        frame = read_frame(io.BytesIO(encode_frame(b"hi")), require_mask=False)
+        assert frame.payload == b"hi"
+
+    def test_masked_server_frame_is_rejected(self) -> None:
+        encoded = encode_masked_frame(b"hi", mask=b"\x00\x00\x00\x00")
+        with pytest.raises(WebSocketProtocolError) as excinfo:
+            read_frame(io.BytesIO(encoded), require_mask=False)
+        assert excinfo.value.code == CLOSE_PROTOCOL_ERROR
+
+    def test_client_connection_masks_outgoing_and_unmasks_incoming(self) -> None:
+        incoming = io.BytesIO(encode_frame(b"server"))
+        outgoing = io.BytesIO()
+        connection = WebSocketConnection(
+            incoming,
+            outgoing,
+            mask_outgoing=True,
+            require_mask=False,
+        )
+        connection.send_text("client")
+        frame = read_frame(io.BytesIO(outgoing.getvalue()), require_mask=True)
+        assert frame.payload == b"client"
+        assert connection.recv().payload == b"server"
+
+    def test_client_close_is_masked(self) -> None:
+        outgoing = io.BytesIO()
+        connection = WebSocketConnection(
+            io.BytesIO(),
+            outgoing,
+            mask_outgoing=True,
+            require_mask=False,
+        )
+        connection.close(CLOSE_NORMAL, "bye")
+        frame = read_frame(io.BytesIO(outgoing.getvalue()), require_mask=True)
+        assert frame.opcode == OPCODE_CLOSE
+        assert struct.unpack("!H", frame.payload[:2])[0] == CLOSE_NORMAL
 
 
 class TestFrameCodec:

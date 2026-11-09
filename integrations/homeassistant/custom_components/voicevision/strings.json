@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to voicevision",
+        "description": "Point Home Assistant at a running voicevision-server.",
+        "data": {
+          "base_url": "Base URL",
+          "token": "Bearer token",
+          "timeout": "Timeout (seconds)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the voicevision server. Check the URL, the token, and that voicevision-server is running."
+    },
+    "abort": {
+      "already_configured": "This voicevision server is already configured."
+    }
+  },
+  "services": {
+    "converse": {
+      "name": "Ask voicevision",
+      "description": "Send text to the local LLM and fire voicevision_response with the answer."
+    },
+    "transcribe": {
+      "name": "Transcribe audio",
+      "description": "Transcribe a WAV file with the local whisper.cpp model."
+    },
+    "describe": {
+      "name": "Describe an image",
+      "description": "Ask the local vision model about an image file."
+    }
+  }
+}

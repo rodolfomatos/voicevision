@@ -98,19 +98,50 @@ def accept_key(client_key: str) -> str:
     return base64.b64encode(digest).decode("ascii")
 
 
-def encode_frame(payload: bytes, opcode: int = OPCODE_TEXT) -> bytes:
-    """Encode a server-to-client frame (never masked)."""
+def encode_frame(
+    payload: bytes,
+    opcode: int = OPCODE_TEXT,
+    *,
+    mask: bytes | None = None,
+) -> bytes:
+    """Encode a frame.
+
+    Without *mask* the frame is a server frame (RFC 6455 §5.1: never masked).
+    With a 4-byte *mask* the payload is masked, which is what a client must do.
+    """
     length = len(payload)
-    header = bytearray([0x80 | (opcode & 0x0F)])
+    first = 0x80 | (opcode & 0x0F)
+    mask_bit = 0x80 if mask is not None else 0x00
+    header = bytearray([first])
     if length < 126:
-        header.append(length)
+        header.append(mask_bit | length)
     elif length <= 0xFFFF:
-        header.append(126)
+        header.append(mask_bit | 126)
         header.extend(struct.pack("!H", length))
     else:
-        header.append(127)
+        header.append(mask_bit | 127)
         header.extend(struct.pack("!Q", length))
-    return bytes(header) + payload
+    if mask is None:
+        return bytes(header) + payload
+    if len(mask) != 4:
+        raise ValueError("mask must be exactly 4 bytes")
+    header.extend(mask)
+    masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+    return bytes(header) + masked
+
+
+def encode_masked_frame(
+    payload: bytes,
+    opcode: int = OPCODE_TEXT,
+    *,
+    mask: bytes | None = None,
+) -> bytes:
+    """Encode a client frame. A random mask is generated when none is given."""
+    if mask is None:
+        import os  # noqa: PLC0415 - only needed by the client path
+
+        mask = os.urandom(4)
+    return encode_frame(payload, opcode, mask=mask)
 
 
 def encode_close(code: int = CLOSE_NORMAL, reason: str = "") -> bytes:
@@ -145,6 +176,7 @@ def _validate_frame(
     opcode: int,
     length: int,
     max_payload: int,
+    require_mask: bool,
 ) -> None:
     """Reject anything outside the supported subset of RFC 6455."""
     if first & 0x70:
@@ -156,8 +188,11 @@ def _validate_frame(
             raise WebSocketProtocolError(CLOSE_PROTOCOL_ERROR, "control frame too large")
     elif not fin:
         raise WebSocketProtocolError(CLOSE_UNSUPPORTED, "fragmentation is not supported")
-    if not second & 0x80:
+    masked = bool(second & 0x80)
+    if require_mask and not masked:
         raise WebSocketProtocolError(CLOSE_PROTOCOL_ERROR, "client frames must be masked")
+    if not require_mask and masked:
+        raise WebSocketProtocolError(CLOSE_PROTOCOL_ERROR, "server frames must not be masked")
     if length > max_payload:
         raise WebSocketProtocolError(CLOSE_TOO_BIG, f"frame exceeds {max_payload} bytes")
 
@@ -166,12 +201,16 @@ def read_frame(
     stream: _Reader,
     *,
     max_payload: int = MAX_FRAME_BYTES,
+    require_mask: bool = True,
 ) -> Frame:
-    """Read and decode one client frame.
+    """Read and decode one frame.
+
+    ``require_mask=True`` (the default) reads a client frame, which must be
+    masked. Pass ``False`` to read an unmasked server frame.
 
     Raises:
         WebSocketClosed: the peer closed before a complete frame arrived.
-        WebSocketProtocolError: RSV bits, fragmentation, missing mask, control
+        WebSocketProtocolError: RSV bits, fragmentation, wrong masking, control
             frame rules or the size limit were violated.
     """
     header = _read_exactly(stream, 2)
@@ -180,16 +219,21 @@ def read_frame(
     fin = bool(first & 0x80)
     opcode = first & 0x0F
     length = _read_length(stream, second & 0x7F)
-    _validate_frame(first, second, fin, opcode, length, max_payload)
+    _validate_frame(first, second, fin, opcode, length, max_payload, require_mask)
 
-    mask = _read_exactly(stream, 4)
+    mask = _read_exactly(stream, 4) if second & 0x80 else b""
     payload = _read_exactly(stream, length)
-    unmasked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
-    return Frame(opcode=opcode, payload=unmasked, fin=fin)
+    if mask:
+        payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+    return Frame(opcode=opcode, payload=payload, fin=fin)
 
 
 class WebSocketConnection:
-    """Thin send/receive wrapper around a handler's socket streams."""
+    """Thin send/receive wrapper around a handler's socket streams.
+
+    The defaults are the server side: read masked client frames, write
+    unmasked server frames. A client flips both flags.
+    """
 
     def __init__(
         self,
@@ -197,16 +241,29 @@ class WebSocketConnection:
         wfile: _Writer,
         *,
         max_payload: int = MAX_FRAME_BYTES,
+        mask_outgoing: bool = False,
+        require_mask: bool = True,
     ) -> None:
         self._rfile = rfile
         self._wfile = wfile
         self._max_payload = max_payload
+        self._mask_outgoing = mask_outgoing
+        self._require_mask = require_mask
 
     def recv(self) -> Frame:
-        return read_frame(self._rfile, max_payload=self._max_payload)
+        return read_frame(
+            self._rfile,
+            max_payload=self._max_payload,
+            require_mask=self._require_mask,
+        )
 
     def send(self, payload: bytes, opcode: int = OPCODE_TEXT) -> None:
-        self._wfile.write(encode_frame(payload, opcode))
+        frame = (
+            encode_masked_frame(payload, opcode)
+            if self._mask_outgoing
+            else encode_frame(payload, opcode)
+        )
+        self._wfile.write(frame)
         self._wfile.flush()
 
     def send_text(self, text: str) -> None:
@@ -221,7 +278,16 @@ class WebSocketConnection:
     def close(self, code: int = CLOSE_NORMAL, reason: str = "") -> None:
         """Send a close frame; ignore a peer that has already gone away."""
         try:
-            self._wfile.write(encode_close(code, reason))
+            if self._mask_outgoing:
+                reason_bytes = reason.encode("utf-8")[:123]
+                self._wfile.write(
+                    encode_masked_frame(
+                        struct.pack("!H", code) + reason_bytes,
+                        OPCODE_CLOSE,
+                    )
+                )
+            else:
+                self._wfile.write(encode_close(code, reason))
             self._wfile.flush()
         except OSError:
             pass

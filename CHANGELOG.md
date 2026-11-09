@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   streams `transcript` → `token` → `done`, plus `reset`, ping/pong and close.
   Minimal RFC 6455 codec in `voicevision.websocket` with no new dependency;
   unmasked/fragmented/oversized frames close with the RFC code
+- **Python client and Home Assistant integration** (T037): `voicevision.client`
+  is a standard-library client for the local API, including WebSocket
+  streaming. `integrations/homeassistant/` adds `voicevision.converse`,
+  `voicevision.transcribe` and `voicevision.describe` services that fire a
+  `voicevision_response` event
 
 ### Fixed
 
