@@ -1,0 +1,26 @@
+# VoiceVision Known Issues
+# Source: CHANGELOG.md, code inspection
+
+## Piper TTS Broken (C-403)
+- /models/voice.onnx exists but voice.onnx.json is empty/corrupt
+- PiperVoice.load() fails with JSON decode error
+- TTS currently non-functional
+- Blocks end-to-end voice loop demo
+- Fix needed: obtain valid piper voice model + JSON config
+- No sudo for apt install; huggingface.co direct curl fails (15-byte responses)
+- Must use huggingface_hub for model downloads
+
+## Import Cost
+- Bare `import voicevision` ~4ms (was ~420ms before PEP 562 lazy loading)
+- pydantic only loaded on first access to VoiceVisionConfig
+- Test: tests/test_import_cost.py asserts pydantic absent from sys.modules
+
+## C901 Complexity
+- listen.py main() and _run_wake_word_continuous() exceed complexity 10
+- Allowed via per-file-ignores in pyproject.toml
+- Pre-existing, not worth refactoring for marginal gain
+
+## Piper Fix Options
+1. Download valid piper voice from huggingface_hub
+2. Fix voice.onnx.json manually
+3. Switch to alternative TTS backend

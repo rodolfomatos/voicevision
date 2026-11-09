@@ -1,0 +1,37 @@
+# VoiceVision Quality Gates
+# Source: Makefile, pyproject.toml
+
+## make check (AES Quality Gate)
+- docs-check: VISION.md, PERSONAS.md, REQUIREMENTS.md, ROADMAP.md have required sections
+- code-check: no TODO/FIXME in src/tests, src/voicevision exists
+- test-check: pytest with --cov-fail-under=80
+- lint-check: ruff check src tests, mypy --strict src, bandit src
+
+## Ruff (pyproject.toml)
+- line-length: 100
+- target-version: py310
+- select: E, F, W, I, UP, B, C4, C9, SIM, T20, PTH, ERA, RET, ARG
+- ignore: S101, ARG001, ARG002
+- per-file-ignores:
+  - preflight.py: T201
+  - listen.py: T201, C901
+  - history.py: T201
+  - server.py: T201
+  - pipeline.py: C901
+
+## MyPy (pyproject.toml)
+- python_version: 3.10
+- strict: true
+- warn_return_any, warn_unused_configs, disallow_untyped_defs, etc.
+- overrides: voicevision.platform.android ignored
+
+## Bandit
+- Security linting on src/
+
+## Pre-commit
+- Runs scripts/verify-implementation.sh on current ticket
+- Requires all ACs checked [x]
+
+## Coverage
+- --cov=src/voicevision --cov-fail-under=80
+- Current: ~87% (2646 statements, 348 missing)

@@ -1,0 +1,35 @@
+# VoiceVision Backends - Overview
+# Source: src/voicevision/backends/
+
+## MoondreamBackend (vision.py)
+- GGUF via llama.cpp (ADR-001, ADR-002)
+- Stateless, no close()
+- Uses supervised llama-server on port 8081
+- Models: moondream2-text-model-f16.gguf + mmproj
+
+## WhisperCppBackend (whisper_cpp.py)
+- whisper.cpp CLI one-shot subprocess
+- Reads WAV from stdin, writes transcript to stdout
+- Supports --detect-language for auto language detection
+- Model path required via VOICEVISION_STT_MODEL
+- Validation: 16kHz mono PCM16 WAV only
+
+## LlamaCppBackend (llama_cpp.py)
+- Supervised llama-server daemon (persistent)
+- Model loaded once, reused across calls
+- Streaming via complete_stream() yields tokens
+- Port 8080 default
+- Model path via VOICEVISION_LLM_MODEL
+
+## PiperBackend (piper.py)
+- Piper TTS CLI
+- CURRENTLY BROKEN: voice.onnx.json is empty/corrupt
+- PiperVoice.load() fails
+- Needs valid piper voice model + JSON config
+- Model path via VOICEVISION_TTS_MODEL, voice via VOICEVISION_TTS_VOICE
+
+## WebrtcVadBackend (vad.py)
+- WebRTC VAD via webrtcvad-wheels
+- 16kHz mono, 30ms frames
+- Aggressiveness 0-3 (default 2)
+- Returns utterance (start, end) byte offsets

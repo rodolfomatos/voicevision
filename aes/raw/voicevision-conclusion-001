@@ -1,0 +1,29 @@
+# VoiceVision Conclusions
+# Source: Architecture synthesis
+
+## C-600: Reusable Component Architecture
+VoiceVision is a reusable Python component ("lego brick") for offline multimodal AI on the edge.
+- Core: VAD→STT→LLM→filter→TTS pipeline
+- Vision: camera→Moondream→LLM→TTS
+- All models as subprocesses (ADR-001/002)
+- Library, not application - caller owns context, models, audio devices
+- Optional HTTP server (localhost only) for integrations
+- Ubuntu 22.04+ and Raspberry Pi OS support
+
+## C-601: TTS Blocking Issue
+Piper TTS currently non-functional due to corrupted voice.onnx.json
+- voice.onnx exists but JSON config is empty
+- PiperVoice.load() fails
+- Blocks full voice loop demo
+- Fix required before v0.3
+
+## C-602: Sprint-04 Features Complete
+All Option A (UX) and Option B (Voice) features implemented:
+- T028: Custom hotword file + multiple wake words
+- T029: --mute flag for TTS suppression
+- T031: Multiple wake words (via T028)
+- T032: Auto language detection
+- T033: Emotion detection
+- T034: Speaker identification
+
+Ready for v0.3 planning once TTS fixed.

@@ -1,0 +1,32 @@
+# VoiceVision Feature: Emotion Detection (T033)
+# Source: src/voicevision/backends/emotion.py
+
+## SimpleEmotionBackend
+- Rule-based keyword matching (no external dependencies)
+- Categories: positive, negative, neutral
+- Always available (available() returns True)
+
+## Keywords
+- Positive: happy, joy, love, excited, great, wonderful, amazing, fantastic, awesome, good, nice, pleased, glad, delighted, thrilled, cheerful, content, satisfied, grateful, thankful, blessed, lucky, fortunate, success, win, victory, celebrate, party, fun, enjoy, like, beautiful, lovely, perfect, excellent, superb, brilliant, outstanding, marvelous, splendid, magnificent, terrific, fabulous, ...
+- Negative: sad, angry, upset, frustrated, disappointed, worried, anxious, stressed, tired, exhausted, bad, terrible, awful, horrible, dreadful, unhappy, miserable, depressed, lonely, alone, hurt, pain, sorry, regret, guilt, shame, fear, scared, afraid, panic, nervous, tense, mad, furious, rage, hate, dislike, annoyed, irritated, bored, tired, sick, ill, problem, issue, trouble, difficult, hard, fail, failure, lost, lose, mistake, error, wrong, broken, ...
+
+## Algorithm
+- Tokenizes text, counts positive/negative keyword matches
+- If no emotion words: neutral (score 0.5)
+- If positive > negative: positive (score 0.5-0.95)
+- If negative > positive: negative (score 0.5-0.95)
+- If equal: neutral (score 0.5)
+- Score based on ratio of emotion words
+
+## PipelineConfig.emotion_enabled
+- Default: False
+- Env: VOICEVISION_EMOTION=1
+
+## Pipeline.detect_emotion(transcript)
+- Returns EmotionResult(label, score) or None
+
+## HTTP /transcribe & /converse
+- When emotion_enabled: returns "emotion": {"label": "...", "score": ...}
+
+## WebSocket /stream
+- Would include emotion in transcript messages (not yet implemented in handler)

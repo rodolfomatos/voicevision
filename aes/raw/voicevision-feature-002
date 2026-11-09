@@ -1,0 +1,23 @@
+# VoiceVision Feature: Mute TTS (T029)
+# Source: src/voicevision/pipeline.py, src/voicevision/listen.py
+
+## PipelineConfig.mute_tts
+- Default: False
+- When True: skips TTS synthesis in all pipeline paths
+
+## Pipeline.process()
+- Checks config.mute_tts before calling tts.synthesize()
+- Still runs VAD→STT→LLM→filter
+- Returns empty bytes instead of synthesized speech
+
+## Pipeline.process_stream() / _stream_transcript() / _process_transcript_sync()
+- All respect mute_tts flag
+- When muted: yields nothing instead of TTS chunks
+
+## Pipeline.describe_and_answer()
+- Returns empty bytes when muted
+
+## ListenConfig.mute_tts
+- CLI: --mute flag
+- Env: VOICEVISION_MUTE_TTS=1
+- Useful for: testing, logging LLM responses, chaining with another TTS

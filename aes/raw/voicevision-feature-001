@@ -1,0 +1,28 @@
+# VoiceVision Feature: Custom Hotword File (T028)
+# Source: src/voicevision/core/hotwords.py, src/voicevision/listen.py
+
+## HotwordConfig
+- words: list[str] - multiple wake words
+- threshold: float (0.0-1.0) - reserved for future ML detection
+
+## load_hotwords()
+- Priority: explicit path > VOICEVISION_HOTWORDS env > ~/.voicevision/hotwords.json > default
+- JSON format: {"words": ["Olá Ambrósio", "Hey Ambrósio"], "threshold": 0.5}
+- Default: ["Olá Ambrósio"] with threshold 0.5
+
+## wake_words_detected()
+- Case-insensitive, accent-insensitive (NFD normalization)
+- Returns (bool, matched_word) - first match wins
+- Used by _run_wake_word, _run_wake_word_continuous, _transcribe_utterances
+
+## CLI Integration
+- --hotwords-file PATH overrides VOICEVISION_HOTWORDS
+- --wake-word "word" replaces first word in list
+- Legacy VOICEVISION_WAKE_WORD still works (replaces first word)
+
+## JSON Output
+- wake_word_detected: true/false
+- wake_word: first configured word (for backward compat)
+
+## History
+- Records matched wake word per entry

@@ -1,0 +1,18 @@
+# VoiceVision Core Pipeline - VoicePipeline.process()
+# Source: src/voicevision/pipeline.py
+
+The VoicePipeline class wires the complete voice loop:
+1. VAD: WebrtcVadBackend segments 16kHz mono PCM16 audio
+2. STT: WhisperCppBackend transcribes via whisper.cpp CLI
+3. LLM: LlamaCppBackend uses supervised llama-server daemon
+4. Filter: Strips qwen3 reasoning traces (<think>...</think>)
+5. TTS: PiperBackend synthesizes speech (currently broken)
+
+Listen mode (src/voicevision/listen.py):
+- Single-shot: captures one utterance, transcribes, prints to stdout
+- Wake word: "Olá Ambrósio" default, configurable via VOICEVISION_HOTWORDS
+- Continuous: --continuous flag loops until Ctrl+C
+- Pre-roll buffer: circular buffer captures audio before wake word
+- History: optional transcript logging to ~/.voicevision/history.jsonl
+
+The pipeline is the single integration point - VAD→STT→LLM→filter→TTS

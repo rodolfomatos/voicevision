@@ -1,0 +1,19 @@
+# VoiceVision Listen Mode
+# Source: src/voicevision/listen.py
+
+Listen mode entry point: voicevision-listen CLI
+
+Features:
+- Microphone → VAD → STT → text on stdout
+- No LLM, no TTS - just speech in, text out
+- Designed for editor keybinds (OpenCode dictation)
+- Wake word mode: --wake-word "Olá Ambrósio" (default)
+- Continuous mode: --continuous loops until Ctrl+C
+- Pre-roll: --pre-roll-seconds N captures audio before wake word
+- JSON output: --json gives structured transcript with metadata
+- Quiet mode: --quiet / VOICEVISION_QUIET suppresses progress messages
+- History: --no-history / VOICEVISION_HISTORY_ENABLED=0 opts out
+- Custom hotwords: VOICEVISION_HOTWORDS points to JSON file with multiple words
+- Multiple wake words: any match triggers (case/accent insensitive)
+
+load_config() builds ListenConfig from environment variables.

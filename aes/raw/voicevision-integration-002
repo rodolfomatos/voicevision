@@ -1,0 +1,37 @@
+# VoiceVision External Integrations
+# Source: integrations/
+
+## Home Assistant (integrations/homeassistant/)
+- Custom component in custom_components/voicevision/
+- Config flow: base_url, token, timeout
+- Services: voicevision.converse, voicevision.transcribe, voicevision.describe
+- Events: voicevision_response fired with {service, text/audio_file/image_file, response/transcript/description}
+- Not tested in CI (Home Assistant not installed) - structural validation only
+- Runs in executor (hass.async_add_executor_job)
+
+## VS Code (integrations/vscode/)
+- Plain CommonJS extension.js (no build step, no node_modules)
+- Commands: voicevision.dictate, voicevision.transcribeFile, voicevision.ask
+- Dictate: shells out to voicevision-listen --quiet
+- Transcribe/Ask: POST to local HTTP server
+- Settings: serverUrl, token, language, listenCommand, listenArgs, maxTokens
+- Errors → showErrorMessage notifications
+- node --check validates extension.js
+
+## Obsidian (integrations/obsidian/)
+- Desktop-only plugin (isDesktopOnly: true)
+- Commands: transcribe-audio-file, ask-about-selection
+- Settings tab: serverUrl, token, language, maxTokens
+- Transcribe: PathModal for WAV file path → POST /transcribe
+- Ask: editor.replaceSelection with /converse response
+- Uses Obsidian's requestUrl (bypasses CORS)
+- Mobile not supported (no fs access)
+
+## Notion (integrations/notion/)
+- voicevision_notion.py CLI
+- Transcribes locally (--audio) or uses existing text (--text-file)
+- Creates Notion page under parent page (--page-id) or database (--database-id)
+- Blocks split at 2000 chars (prefers newline, then space, then hard cut)
+- Token from NOTION_TOKEN env var (only at export time, never logged)
+- --dry-run prints payload without contacting Notion
+- Inference stays local; Notion export is explicit opt-in cloud step

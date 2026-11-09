@@ -1,0 +1,18 @@
+# VoiceVision Vision Pipeline - describe_and_answer()
+# Source: src/voicevision/pipeline.py
+
+describe_and_answer(image_data, question):
+1. Vision: MoondreamBackend.describe(image_data, prompt=question)
+2. LLM: Generates response based on description + question
+3. Filter: Strips reasoning traces
+4. TTS: Synthesizes response (unless muted)
+
+MoondreamBackend (src/voicevision/backends/vision.py):
+- Uses GGUF model via llama.cpp subprocess (ADR-001/002)
+- Model: moondream2-text-model-f16.gguf + moondream2-mmproj-f16.gguf
+- Stateless - no close() needed
+- Port 8081 for vision server
+
+Camera backends (src/voicevision/backends/camera.py):
+- OpenCV: webcam capture
+- Playwright: web page screenshots

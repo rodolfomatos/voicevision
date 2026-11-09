@@ -1,0 +1,31 @@
+# VoiceVision HTTP Server & WebSocket
+# Source: src/voicevision/server.py, src/voicevision/websocket.py
+
+## HTTP Server (voicevision-server)
+- stdlib only (http.server, json, base64)
+- Binds 127.0.0.1:8765 by default
+- Optional bearer auth via VOICEVISION_SERVER_TOKEN
+- 10 MiB body cap
+- Endpoints:
+  - GET /health → {"status": "ok", "version": "..."}
+  - POST /transcribe → {"audio_base64": "...", "language": "auto|en|pt..."} → {"transcript", "language", "detected_language", "transcription_ms"}
+  - POST /describe → {"image_base64": "...", "question": "..."} → {"description"}
+  - POST /converse → {"text": "...", "max_tokens": 512} → {"response"}
+
+## WebSocket /stream (websocket.py)
+- Minimal RFC 6455 subset (no extensions, no fragmentation)
+- Server frames unmasked, client frames masked
+- 1 MiB frame cap, 10 MiB audio cap
+- Client messages: {"type": "audio", "audio_base64": "...", "language": "..."}
+- Client messages: {"type": "end"} / {"type": "reset"}
+- Server messages: {"type": "transcript", "transcript": "...", "language": "..."}
+- Server messages: {"type": "token", "text": "..."}
+- Server messages: {"type": "done"} / {"type": "error", "error": "..."}
+- Ping/pong, close codes (1000, 1002, 1003, 1007, 1009)
+
+## VoiceVisionClient (client.py)
+- Stdlib only (urllib.request, socket)
+- HTTP: health(), transcribe(), describe(), converse()
+- WS: stream(chunks) → yields server messages
+- Bearer token on both HTTP and WS
+- Errors → VoiceVisionClientError with server message

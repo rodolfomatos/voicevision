@@ -1,0 +1,685 @@
+nodes:
+- id: C-100
+  kind: claim
+  category: 1-axiomatic
+  state: ASSUMED
+  validation_type: logical
+  validation_confidence: 1.0
+  extraction_confidence: 1.0
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors: []
+  source_chunks:
+  - raw/voicevision-axiom-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: docs/ARCHITECTURE.md::foundation
+  note: All processing runs locally; no cloud APIs required
+- id: C-101
+  kind: claim
+  category: 1-axiomatic
+  state: ASSUMED
+  validation_type: logical
+  validation_confidence: 1.0
+  extraction_confidence: 1.0
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors: []
+  source_chunks:
+  - raw/voicevision-axiom-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: docs/ARCHITECTURE.md::foundation
+  note: Models are subprocesses, not linked libraries
+- id: C-102
+  kind: claim
+  category: 1-axiomatic
+  state: ASSUMED
+  validation_type: logical
+  validation_confidence: 1.0
+  extraction_confidence: 1.0
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors: []
+  source_chunks:
+  - raw/voicevision-axiom-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: docs/ARCHITECTURE.md::foundation
+  note: Wake word is 'Olá Ambrósio' by default
+- id: C-200
+  kind: claim
+  category: 2-conditioned
+  state: FALSIFIED
+  validation_type: logical
+  validation_confidence: 0.98
+  extraction_confidence: 0.95
+  extractor: nemotron-3-ultra
+  logical_form: (C-100 and C-101 and C-102) => C-200
+  connectors:
+  - type: implies
+    from:
+    - C-100
+    - C-101
+    - C-102
+    to: C-200
+  source_chunks:
+  - raw/voicevision-core-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/pipeline.py::VoicePipeline.process
+  note: Core pipeline VAD→STT→LLM→filter works, but TTS (Piper) is broken; end-to-end
+    voice loop non-functional
+- id: C-201
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.95
+  extraction_confidence: 0.92
+  extractor: nemotron-3-ultra
+  logical_form: C-200 => (C-201 or C-202)
+  connectors:
+  - type: implies
+    from:
+    - C-200
+    to: C-201
+  source_chunks:
+  - raw/voicevision-core-002
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/listen.py::run
+  note: Listen mode supports single-shot and continuous wake word
+- id: C-202
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.96
+  extraction_confidence: 0.93
+  extractor: nemotron-3-ultra
+  logical_form: C-200 and C-203 => C-202
+  connectors:
+  - type: and
+    from:
+    - C-200
+    - C-203
+    to: C-202
+  source_chunks:
+  - raw/voicevision-core-003
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/pipeline.py::describe_and_answer
+  note: Vision pipeline adds camera→vision→LLM→TTS path
+- id: C-203
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.97
+  extraction_confidence: 0.94
+  extractor: nemotron-3-ultra
+  logical_form: C-203
+  connectors: []
+  source_chunks:
+  - raw/voicevision-backend-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/backends/vision.py::MoondreamBackend
+  note: MoondreamBackend uses GGUF via llama.cpp subprocess (ADR-001/002)
+- id: C-204
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: external
+  validation_confidence: 0.9
+  extraction_confidence: 0.88
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors:
+  - type: implies
+    from:
+    - C-205
+    to: C-204
+  source_chunks:
+  - raw/voicevision-backend-002
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: external
+  anchor: src/voicevision/backends/whisper_cpp.py
+  note: WhisperCppBackend transcribes via whisper.cpp CLI; requires binary
+- id: C-205
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: external
+  validation_confidence: 0.92
+  extraction_confidence: 0.9
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors: []
+  source_chunks:
+  - raw/voicevision-backend-003
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: external
+  anchor: src/voicevision/backends/llama_cpp.py::LlamaCppBackend
+  note: LlamaCppBackend uses supervised llama-server daemon
+- id: C-206
+  kind: claim
+  category: 2-conditioned
+  state: FALSIFIED
+  validation_type: external
+  validation_confidence: 0.85
+  extraction_confidence: 0.82
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors: []
+  source_chunks:
+  - raw/voicevision-backend-004
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: external
+  anchor: src/voicevision/backends/piper.py::PiperBackend
+  note: PiperBackend does not work; Piper TTS broken (voice.onnx.json corrupt)
+- id: C-207
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.94
+  extraction_confidence: 0.91
+  extractor: nemotron-3-ultra
+  logical_form: C-207
+  connectors: []
+  source_chunks:
+  - raw/voicevision-backend-005
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/backends/vad.py::WebrtcVadBackend
+  note: WebRTC VAD segments 16kHz mono PCM16
+- id: C-300
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.99
+  extraction_confidence: 0.97
+  extractor: nemotron-3-ultra
+  logical_form: C-200 => C-300
+  connectors:
+  - type: implies
+    from:
+    - C-200
+    to: C-300
+  source_chunks:
+  - raw/voicevision-integration-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/server.py::VoiceVisionHTTPServer
+  note: HTTP server exposes /health, /transcribe, /describe, /converse
+- id: C-301
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.97
+  extraction_confidence: 0.94
+  extractor: nemotron-3-ultra
+  logical_form: C-200 => C-301
+  connectors:
+  - type: implies
+    from:
+    - C-200
+    to: C-301
+  source_chunks:
+  - raw/voicevision-integration-002
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/websocket.py::WebSocketConnection
+  note: WebSocket /stream does audio→transcript→token→done streaming
+- id: C-302
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.96
+  extraction_confidence: 0.93
+  extractor: nemotron-3-ultra
+  logical_form: (C-300 or C-301) => C-302
+  connectors:
+  - type: or
+    from:
+    - C-300
+    - C-301
+    to: C-302
+  source_chunks:
+  - raw/voicevision-integration-003
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/client.py::VoiceVisionClient
+  note: Stdlib client wraps HTTP + WS for integrations
+- id: C-303
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: human
+  validation_confidence: 0.88
+  extraction_confidence: 0.85
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors:
+  - type: implies
+    from:
+    - C-302
+    to: C-303
+  source_chunks:
+  - raw/voicevision-integration-004
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: human
+  anchor: integrations/homeassistant/
+  note: HA custom component registers 3 services, fires voicevision_response
+- id: C-304
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: human
+  validation_confidence: 0.87
+  extraction_confidence: 0.84
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors:
+  - type: implies
+    from:
+    - C-302
+    to: C-304
+  source_chunks:
+  - raw/voicevision-integration-005
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: human
+  anchor: integrations/vscode/
+  note: 'VS Code extension: Dictate, Transcribe File, Ask About Selection'
+- id: C-305
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: human
+  validation_confidence: 0.86
+  extraction_confidence: 0.83
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors:
+  - type: implies
+    from:
+    - C-302
+    to: C-305
+  source_chunks:
+  - raw/voicevision-integration-006
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: human
+  anchor: integrations/obsidian/
+  note: 'Obsidian plugin: Transcribe audio file, Ask about selection'
+- id: C-306
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: human
+  validation_confidence: 0.85
+  extraction_confidence: 0.82
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors:
+  - type: and
+    from:
+    - C-302
+    - C-307
+    to: C-306
+  source_chunks:
+  - raw/voicevision-integration-007
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: human
+  anchor: integrations/notion/
+  note: Notion export is opt-in cloud step; inference stays local
+- id: C-307
+  kind: claim
+  category: 3-contingent
+  state: ASSUMED
+  validation_type: human
+  validation_confidence: 0.7
+  extraction_confidence: 0.65
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors: []
+  source_chunks:
+  - raw/voicevision-integration-008
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: human
+  anchor: integrations/notion/voicevision_notion.py
+  note: Notion token from NOTION_TOKEN env; blocks split at 2000 chars
+- id: C-400
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.99
+  extraction_confidence: 0.98
+  extractor: nemotron-3-ultra
+  logical_form: C-400
+  connectors: []
+  source_chunks:
+  - raw/voicevision-quality-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: Makefile::check
+  note: make check runs ruff, mypy --strict, bandit, pytest ≥80% coverage
+- id: C-401
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.97
+  extraction_confidence: 0.95
+  extractor: nemotron-3-ultra
+  logical_form: C-401
+  connectors: []
+  source_chunks:
+  - raw/voicevision-quality-002
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: pyproject.toml
+  note: C901 complexity allowed for listen.py main/_run_wake_word_continuous
+- id: C-402
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.95
+  extraction_confidence: 0.92
+  extractor: nemotron-3-ultra
+  logical_form: C-402
+  connectors: []
+  source_chunks:
+  - raw/voicevision-quality-003
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: tests/test_import_cost.py
+  note: Import cost test asserts pydantic absent from sys.modules on bare import
+- id: C-403
+  kind: claim
+  category: 3-contingent
+  state: SUPPORTED
+  validation_type: external
+  validation_confidence: 0.99
+  extraction_confidence: 0.97
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors:
+  - type: not
+    from:
+    - C-206
+    to: C-403
+  source_chunks:
+  - raw/voicevision-quality-004
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: external
+  anchor: src/voicevision/backends/piper.py
+  note: 'Piper TTS is broken: voice.onnx.json empty/corrupt; PiperVoice.load() fails'
+- id: C-500
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.96
+  extraction_confidence: 0.93
+  extractor: nemotron-3-ultra
+  logical_form: C-500
+  connectors: []
+  source_chunks:
+  - raw/voicevision-feature-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/core/hotwords.py
+  note: 'T028: Custom hotword file (VOICEVISION_HOTWORDS JSON) + multiple wake words'
+- id: C-501
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.97
+  extraction_confidence: 0.94
+  extractor: nemotron-3-ultra
+  logical_form: C-501
+  connectors: []
+  source_chunks:
+  - raw/voicevision-feature-002
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/pipeline.py::mute_tts
+  note: 'T029: --mute flag / VOICEVISION_MUTE_TTS skips TTS only'
+- id: C-502
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.98
+  extraction_confidence: 0.95
+  extractor: nemotron-3-ultra
+  logical_form: C-502
+  connectors: []
+  source_chunks:
+  - raw/voicevision-feature-003
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/backends/whisper_cpp.py::detect_language
+  note: 'T032: Auto language detection via whisper.cpp --detect-language'
+- id: C-503
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.94
+  extraction_confidence: 0.91
+  extractor: nemotron-3-ultra
+  logical_form: C-503
+  connectors: []
+  source_chunks:
+  - raw/voicevision-feature-004
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/backends/emotion.py::SimpleEmotionBackend
+  note: 'T033: Rule-based emotion detection (positive/negative/neutral)'
+- id: C-504
+  kind: claim
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.92
+  extraction_confidence: 0.88
+  extractor: nemotron-3-ultra
+  logical_form: C-504
+  connectors: []
+  source_chunks:
+  - raw/voicevision-feature-005
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: src/voicevision/backends/speaker.py::SimpleSpeakerBackend
+  note: 'T034: Session-based speaker ID via RMS/ZCR/spectral centroid'
+- id: C-600
+  kind: conclusion
+  category: 2-conditioned
+  state: INFERRED
+  validation_type: logical
+  validation_confidence: 0.94
+  extraction_confidence: 0.91
+  extractor: nemotron-3-ultra
+  logical_form: (C-200 and C-203 and C-300 and C-301) => C-600
+  connectors:
+  - type: and
+    from:
+    - C-200
+    - C-203
+    - C-300
+    - C-301
+    to: C-600
+  source_chunks:
+  - raw/voicevision-conclusion-001
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: README.md::Architecture
+  note: VoiceVision is a reusable Python component for offline multimodal AI
+- id: C-601
+  kind: conclusion
+  category: 3-contingent
+  state: INFERRED
+  validation_type: human
+  validation_confidence: 0.85
+  extraction_confidence: 0.82
+  extractor: nemotron-3-ultra
+  logical_form: ''
+  connectors:
+  - type: implies
+    from:
+    - C-403
+    to: C-601
+  source_chunks:
+  - raw/voicevision-conclusion-002
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: human
+  anchor: CHANGELOG.md::Known Issues
+  note: TTS currently non-functional; blocks end-to-end voice loop demo
+- id: C-602
+  kind: conclusion
+  category: 2-conditioned
+  state: SUPPORTED
+  validation_type: logical
+  validation_confidence: 0.96
+  extraction_confidence: 0.93
+  extractor: nemotron-3-ultra
+  logical_form: (C-500 and C-501 and C-502 and C-503 and C-504) => C-602
+  connectors:
+  - type: and
+    from:
+    - C-500
+    - C-501
+    - C-502
+    - C-503
+    - C-504
+    to: C-602
+  source_chunks:
+  - raw/voicevision-conclusion-003
+  last_verified: '2026-11-09T12:00:00Z'
+  verification_method: logical
+  anchor: CHANGELOG.md::v0.2.2
+  note: All Option A/B features implemented in sprint-04
+edges:
+- from: C-100
+  to: C-200
+  type: factual
+- from: C-101
+  to: C-200
+  type: factual
+- from: C-102
+  to: C-200
+  type: factual
+- from: C-200
+  to: C-201
+  type: factual
+- from: C-200
+  to: C-202
+  type: aggregation
+- from: C-200
+  to: C-203
+  type: factual
+- from: C-200
+  to: C-204
+  type: factual
+- from: C-200
+  to: C-205
+  type: factual
+- from: C-200
+  to: C-206
+  type: factual
+- from: C-200
+  to: C-207
+  type: factual
+- from: C-200
+  to: C-300
+  type: factual
+- from: C-200
+  to: C-301
+  type: factual
+- from: C-300
+  to: C-302
+  type: factual
+- from: C-301
+  to: C-302
+  type: factual
+- from: C-302
+  to: C-303
+  type: factual
+- from: C-302
+  to: C-304
+  type: factual
+- from: C-302
+  to: C-305
+  type: factual
+- from: C-302
+  to: C-306
+  type: factual
+- from: C-307
+  to: C-306
+  type: factual
+- from: C-400
+  to: C-200
+  type: documentary
+- from: C-401
+  to: C-400
+  type: documentary
+- from: C-402
+  to: C-400
+  type: documentary
+- from: C-403
+  to: C-206
+  type: not
+- from: C-200
+  to: C-500
+  type: aggregation
+- from: C-200
+  to: C-501
+  type: aggregation
+- from: C-204
+  to: C-502
+  type: factual
+- from: C-200
+  to: C-503
+  type: aggregation
+- from: C-200
+  to: C-504
+  type: aggregation
+- from: C-200
+  to: C-600
+  type: logical
+- from: C-203
+  to: C-600
+  type: factual
+- from: C-300
+  to: C-600
+  type: factual
+- from: C-301
+  to: C-600
+  type: factual
+- from: C-403
+  to: C-601
+  type: logical
+- from: C-500
+  to: C-602
+  type: factual
+- from: C-501
+  to: C-602
+  type: factual
+- from: C-502
+  to: C-602
+  type: factual
+- from: C-503
+  to: C-602
+  type: factual
+- from: C-504
+  to: C-602
+  type: factual

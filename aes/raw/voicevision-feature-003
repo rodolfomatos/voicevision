@@ -1,0 +1,28 @@
+# VoiceVision Feature: Auto Language Detection (T032)
+# Source: src/voicevision/backends/whisper_cpp.py, src/voicevision/server.py, src/voicevision/listen.py
+
+## WhisperCppBackend.detect_language()
+- Runs whisper.cpp with --detect-language flag
+- Parses "detected language: en" or "language: en" from output
+- Returns ISO 639-1 code (en, pt, es, etc.)
+- Raises BackendExecutionError if detection fails
+
+## WhisperCppBackend.transcribe(language="auto")
+- If language="auto": calls detect_language() then transcribes with detected lang
+- If language="pt": uses pt for this call (rebuilds argv)
+- If language=None: uses constructor language
+
+## VoiceVisionService.transcribe()
+- Handles language="auto" by creating temp backend for detection
+- Then transcribes with detected language
+- Returns (transcript, elapsed_ms) as usual
+
+## HTTP /transcribe
+- Accepts "language": "auto" in request body
+- Returns detected_language field when auto used
+
+## WebSocket /stream
+- Accepts "language": "auto" in audio frames
+
+## CLI voicevision-listen
+- --language auto enables detection

@@ -1,0 +1,9 @@
+# VoiceVision Axiomatic Foundations
+# Source: Architecture discussions, design docs
+
+VoiceVision is an offline multimodal AI brick for edge deployment.
+- All processing runs locally on the device
+- No cloud API calls are made by the core library
+- Models run as subprocesses (not linked libraries)
+- This is a deliberate architectural constraint for privacy and reliability
+- The library is a "lego brick" - reusable component, not an application

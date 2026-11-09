@@ -10,7 +10,7 @@
         verify-implementation \
         install-precommit install-voice-input \
         aes-plan aes-build aes-verify aes-review aes-learn \
-        aes-wake aes-sleep
+        aes-wake aes-sleep aes-preflight aes-conflict
 
 # --- Configurable commands ---
 AES_LANGUAGE ?= python
@@ -82,7 +82,23 @@ build:
 	@$(AES_BUILD)
 
 # --- Check (AES Quality Gate) ---
-check: docs-check code-check test-check lint-check
+
+# AES Preflight gate
+aes-preflight:
+	@bash ~/.config/opencode/skills/aes-preflight/preflight.sh
+
+# AES Conflict gate
+aes-conflict:
+	@python3 ~/.config/opencode/skills/aes-conflict/scripts/aes-conflict-check.py
+
+# AES-Epistemics gates (auto-added by aes-epistemics-wire)
+gmif-check:
+	@bash ~/.config/opencode/skills/aes-epistemics/scripts/gmif-check.sh
+
+gmif-staleness:
+	@bash ~/.config/opencode/skills/aes-epistemics/scripts/gmif-staleness-check.sh
+
+check: aes-preflight aes-conflict gmif-check gmif-staleness docs-check code-check test-check lint-check
 	@echo "✅ All quality gates passed"
 
 docs-check:
