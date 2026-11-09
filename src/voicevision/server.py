@@ -40,6 +40,7 @@ from urllib.parse import urlsplit
 
 from voicevision import __version__
 from voicevision.audio import pcm16_to_wav, require_whisper_format
+from voicevision.backends.emotion import SimpleEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
@@ -126,6 +127,9 @@ class ServerConfig:
     vision_host: str = "127.0.0.1"
     vision_port: int = 8081
 
+    # Emotion detection
+    emotion_enabled: bool = False
+
 
 def load_config() -> ServerConfig:
     """Build a :class:`ServerConfig` from environment variables.
@@ -149,6 +153,7 @@ def load_config() -> ServerConfig:
         vision_model=os.environ.get("VOICEVISION_VISION_MODEL", ""),
         vision_host=os.environ.get("VOICEVISION_VISION_HOST", "127.0.0.1"),
         vision_port=_env_int("VOICEVISION_VISION_PORT", 8081),
+        emotion_enabled=_env_bool("VOICEVISION_EMOTION", False),
     )
 
 
@@ -407,12 +412,20 @@ class _RequestHandler(BaseHTTPRequestHandler):
                 "'language' must be a non-empty string",
             )
         transcript, elapsed_ms = self._app.transcribe(wav, language)
-        return {
+
+        result: dict[str, Any] = {
             "transcript": transcript,
             "language": language if language != "auto" else "auto",
             "detected_language": language if language == "auto" else None,
             "transcription_ms": round(elapsed_ms, 3),
         }
+
+        # Emotion detection
+        if self._config.emotion_enabled:
+            emotion = SimpleEmotionBackend().detect(transcript)
+            result["emotion"] = {"label": emotion.label, "score": emotion.score}
+
+        return result
 
     def _handle_describe(self, payload: dict[str, Any]) -> dict[str, Any]:
         image = _decode_base64(payload, "image_base64")
@@ -439,7 +452,15 @@ class _RequestHandler(BaseHTTPRequestHandler):
                 f"'max_tokens' must be between 1 and {MAX_TOKENS_LIMIT}",
             )
         response = self._app.converse(text, max_tokens)
-        return {"response": response}
+
+        result: dict[str, Any] = {"response": response}
+
+        # Emotion detection on the response
+        if self._config.emotion_enabled:
+            emotion = SimpleEmotionBackend().detect(response)
+            result["emotion"] = {"label": emotion.label, "score": emotion.score}
+
+        return result
 
     # -- WebSocket streaming ----------------------------------------------
 

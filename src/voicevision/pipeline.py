@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, cast
 
+from voicevision.backends.emotion import EmotionResult, SimpleEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
 from voicevision.backends.piper import PiperBackend
 from voicevision.backends.vad import WebrtcVadBackend
@@ -60,6 +61,9 @@ class PipelineConfig:
 
     # Mute TTS
     mute_tts: bool = False
+
+    # Emotion detection
+    emotion_enabled: bool = False
 
 
 class VoicePipeline:
@@ -184,12 +188,29 @@ class VoicePipeline:
             # 5. Store in conversation history
             self._conversation_history.append((transcript, response_text))
 
-            # 6. TTS: synthesize response (unless muted)
+            # 6. Emotion detection (if enabled)
+            if self.config.emotion_enabled:
+                SimpleEmotionBackend().detect(transcript)
+
+            # 7. TTS: synthesize response (unless muted)
             if not self.config.mute_tts:
                 output_chunks.append(self.tts.synthesize(response_text))
 
         # Concatenate all speech chunks
         return b"".join(output_chunks)
+
+    def detect_emotion(self, transcript: str) -> EmotionResult | None:
+        """Detect emotion from a transcript if emotion is enabled.
+
+        Args:
+            transcript: The transcript text to analyze.
+
+        Returns:
+            EmotionResult if emotion detection is enabled, None otherwise.
+        """
+        if not self.config.emotion_enabled:
+            return None
+        return SimpleEmotionBackend().detect(transcript)
 
     def process_stream(self, audio_chunks: Iterator[bytes]) -> Iterator[bytes]:
         """Process a stream of audio chunks, yielding speech as it's ready.

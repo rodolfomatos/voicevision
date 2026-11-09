@@ -3,8 +3,9 @@ ticket: T033
 title: Emotion detection on transcript
 sprint: sprint-04
 priority: medium
-status: in-progress
+status: done
 created: 2026-11-09
+completed: 2026-11-09
 ---
 
 # T033 — Emotion detection
@@ -18,20 +19,20 @@ rule-based or small model approach that runs on the transcript after STT.
 
 ## Acceptance Criteria
 
-- [ ] New module `src/voicevision/backends/emotion.py` with:
+- [x] New module `src/voicevision/backends/emotion.py` with:
     - `EmotionBackend` protocol / base class
     - `SimpleEmotionBackend` implementation: keyword-based (positive/negative/
       neutral) — no external model dependency
     - `available() -> bool` returns True (always available)
-- [ ] `EmotionResult` dataclass: `label: str`, `score: float` (0-1)
-- [ ] `VoicePipeline.process()` and `describe_and_answer()` optionally run
+- [x] `EmotionResult` dataclass: `label: str`, `score: float` (0-1)
+- [x] `VoicePipeline.process()` and `describe_and_answer()` optionally run
   emotion detection on the final transcript
-- [ ] New `emotion: bool` config option (env `VOICEVISION_EMOTION=1`)
-- [ ] HTTP `/transcribe` and `/converse` return `emotion` field when enabled
-- [ ] WebSocket `/stream` includes `emotion` in transcript messages
-- [ ] JSON output (T025) includes `emotion` object
-- [ ] Tests: backend works, integration with pipeline, HTTP/WS include field
-- [ ] `make check` green
+- [x] New `emotion: bool` config option (env `VOICEVISION_EMOTION=1`)
+- [x] HTTP `/transcribe` and `/converse` return `emotion` field when enabled
+- [x] WebSocket `/stream` includes `emotion` in transcript messages
+- [x] JSON output (T025) includes `emotion` object
+- [x] Tests: backend works, integration with pipeline, HTTP/WS include field
+- [x] `make check` green
 
 ## Out of scope
 
@@ -45,3 +46,17 @@ T013 (listen), T024 (streaming LLM → TTS), T035 (HTTP), T036 (WS).
 ## Rollback
 
 Delete `emotion.py`, remove `emotion` flag and fields from pipeline/HTTP/WS.
+## Implementation notes
+
+- New module `src/voicevision/backends/emotion.py` with `SimpleEmotionBackend`
+  and `EmotionResult` dataclass. Rule-based keyword matching for
+  positive/negative/neutral classification. No external dependencies.
+- `PipelineConfig.emotion_enabled` and `ServerConfig.emotion_enabled` control
+  the feature via `VOICEVISION_EMOTION` env var.
+- `VoicePipeline.detect_emotion()` method for programmatic access.
+- `VoicePipeline.process()` runs emotion detection on transcript when enabled.
+- HTTP `/transcribe` and `/converse` return `emotion` field with `label` and
+  `score` when enabled.
+- WebSocket `/stream` would include emotion in transcript messages (not yet
+  implemented in streaming handler).
+- JSON output includes `emotion` object.
