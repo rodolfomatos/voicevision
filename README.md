@@ -78,9 +78,13 @@ curl -L -o /models/whisper-base.bin \
 curl -L -o /models/Qwen3-1.7B-Q8_0.gguf \
   https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q8_0.gguf
 
-# piper TTS voice model (~2 MB)
+# piper TTS voice model (~63 MB)
 curl -L -o /models/voice.onnx \
-  https://huggingface.co/rhasspy/piper-voices/raw/master/en/en_US/kokoro/x_low/en_US-kokoro-x_low.onnx
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx
+
+# piper TTS voice config (~5 KB)
+curl -L -o /models/voice.onnx.json \
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
 
 # moondream vision model (2.8 GB text model)
 curl -L -o /models/moondream2-text-model-f16.gguf \
@@ -142,6 +146,73 @@ voicevision-listen --seconds 5 --quiet
 # Stay resident: print every wake word utterance until Ctrl+C
 voicevision-listen --wake-word "Olá Ambrósio" --continuous
 ```
+
+## Multiple wake words
+
+Define multiple wake words via JSON config or env var:
+
+```bash
+# JSON file at ~/.voicevision/hotwords.json
+# {"words": ["Olá Ambrósio", "Hey Ambrósio"], "threshold": 0.5}
+export VOICEVISION_HOTWORDS=~/.voicevision/hotwords.json
+
+# Or override first word via CLI
+voicevision-listen --wake-word "Hey Ambrósio"
+```
+
+## Mute TTS
+
+Run full pipeline but suppress TTS output (useful for testing/logging):
+
+```bash
+voicevision-listen --mute
+# or env var
+export VOICEVISION_MUTE_TTS=1
+```
+
+## Auto language detection
+
+Let whisper.cpp detect the spoken language automatically:
+
+```bash
+voicevision-listen --language auto
+# or env var
+export VOICEVISION_STT_LANGUAGE=auto
+```
+
+## Emotion detection
+
+Enable rule-based emotion classification on transcripts:
+
+```bash
+export VOICEVISION_EMOTION=1
+```
+
+Output includes `emotion: {"label": "positive|negative|neutral", "score": 0.0-1.0}`.
+
+## Speaker identification
+
+Enable session-based speaker tracking:
+
+```bash
+export VOICEVISION_SPEAKER=1
+```
+
+Output includes `speaker: "Speaker 1|2|..."` per utterance.
+
+## AES Skills
+
+The project includes several AES skills for development workflow:
+
+| Skill | Command | Purpose |
+|-------|---------|---------|
+| `aes-preflight` | `make aes-preflight` | Pre-flight diagnostics (skills, hooks, config) |
+| `aes-conflict` | `make aes-conflict` | Cross-session conflict detection |
+| `aes-epistemics` | `make gmif-check` | GMIF v2 SAT validation of island graphs |
+| `aes-wake` | `make aes-wake` | Load relevant context before phases |
+| `aes-sleep` | `make aes-sleep` | Archive stale docs, regenerate index |
+
+Run `make check` to execute all quality gates including these skills.
 
 ## With clipboard (for OpenCode / any editor)
 
@@ -425,7 +496,8 @@ MIT. See `LICENSE`.
 
 | Version | Date | Changes |
 |---------|------|---------|
-| Unreleased | 2026-11-09 | JSON/quiet output, transcript history, continuous wake word, local HTTP server |
+| Unreleased | 2026-11-09 | Piper TTS fix, custom hotwords, mute TTS, multiple wake words, auto language detection, emotion detection, speaker ID, aes-conflict skill, aes-preflight, aes-epistemics |
+| 0.2.2 | 2026-11-09 | Vision backends (OpenCV + Playwright), MoondreamBackend, describe_and_answer(), conversation memory, streaming LLM → TTS |
 | 0.2.1 | 2026-11-07 | Makefile with voicevision-specific targets; docs fixes |
 | 0.2.0 | 2026-11-07 | Vision backends (OpenCV + Playwright), MoondreamBackend, describe_and_answer(), conversation memory, streaming LLM → TTS |
 | 0.1.1 | 2026-11-07 | Fix env-dependent tests, add vision example to README |

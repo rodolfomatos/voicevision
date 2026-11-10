@@ -9,60 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`voicevision-listen --json`** (T025): structured output with `transcript`,
-  ISO 8601 `timestamp`, `language`, `audio_duration_seconds`,
-  `transcription_ms`, and `wake_word_detected` / `wake_word` in wake word mode
-- **`voicevision-listen --quiet`** (T026): suppresses progress and outcome
-  messages on stderr, leaving only the transcript (or JSON) on stdout. Fatal
-  errors are still reported. Also configurable via `VOICEVISION_QUIET=1`
-- **Transcript history** (T027): every transcription is appended to
-  `~/.voicevision/history.jsonl` (JSON Lines, `0600`). New `voicevision-history`
-  CLI lists or clears it; `--no-history` and `VOICEVISION_HISTORY_ENABLED=0`
-  opt out
-- **Continuous wake word mode** (T030): `--continuous` keeps listening and
-  prints every wake word utterance until `Ctrl+C`; each detection is recorded
-  in the history with its wake word
-- **Local HTTP server** (T035): new `voicevision-server` command exposing
-  `GET /health`, `POST /transcribe`, `POST /describe` and `POST /converse` as
-  JSON. Standard library only, binds `127.0.0.1` by default, optional bearer
-  auth via `VOICEVISION_SERVER_TOKEN`, 10 MiB body cap
-- **WebSocket streaming** (T036): `GET /stream` accepts `audio` frames and
-  streams `transcript` → `token` → `done`, plus `reset`, ping/pong and close.
-  Minimal RFC 6455 codec in `voicevision.websocket` with no new dependency;
-  unmasked/fragmented/oversized frames close with the RFC code
-- **Python client and Home Assistant integration** (T037): `voicevision.client`
-  is a standard-library client for the local API, including WebSocket
-  streaming. `integrations/homeassistant/` adds `voicevision.converse`,
-  `voicevision.transcribe` and `voicevision.describe` services that fire a
-  `voicevision_response` event
-- **VS Code extension** (T038): `integrations/vscode/` adds Dictate,
-  Transcribe Audio File and Ask About Selection commands. Plain JavaScript,
-  no build step; dictation shells out to `voicevision-listen`, the other two
-  use the local HTTP server
-- **Obsidian plugin and Notion export** (T039): `integrations/obsidian/` adds
-  Transcribe audio file and Ask about selection commands plus a settings tab;
-  `integrations/notion/` exports a transcript (or locally transcribed audio)
-  to a Notion page. Notion export is the only opt-in cloud step — inference
-  stays local and the token comes from `NOTION_TOKEN`
+- **Piper TTS fix** — valid Piper voice model (`en_US-lessac-medium`) and config downloaded via `huggingface_hub`; replaced corrupted `voice.onnx` (14 bytes) and `voice.onnx.json` (1.5 KB) with valid files
+- **Custom hotword file** (T028): `VOICEVISION_HOTWORDS` env var points to JSON file with multiple wake words; `--hotwords-file` CLI; backward compatible with `VOICEVISION_WAKE_WORD`
+- **Mute TTS flag** (T029): `--mute` / `VOICEVISION_MUTE_TTS` skips TTS synthesis while running full pipeline
+- **Multiple wake words** (T031): `VOICEVISION_HOTWORDS` JSON supports multiple wake words; any match triggers; matched word returned for logging/history
+- **Auto language detection** (T032): `voicevision-listen --language auto` / `VOICEVISION_STT_LANGUAGE=auto` uses whisper.cpp `--detect-language`; HTTP `/transcribe` returns `detected_language`
+- **Emotion detection** (T033): `VOICEVISION_EMOTION=1` enables rule-based sentiment (positive/negative/neutral) on transcripts via `SimpleEmotionBackend`
+- **Speaker identification** (T034): `VOICEVISION_SPEAKER=1` enables session-based speaker tracking via RMS/ZCR/spectral centroid features; returns `Speaker 1`, `Speaker 2`, etc.
+- **aes-conflict skill** (T040): `make aes-conflict` detects 5 conflict types (orphan refs, epistemic contradictions, causality violations, session conflicts, stale refs) via Z3 SAT solving
+- **aes-preflight integration**: `make aes-preflight` now part of `make check`; validates skills, hooks, config, recent commits
+- **aes-epistemics integration**: `make gmif-check` + `gmif-staleness` in quality gates; Z3 SAT validation of island graphs; self-ticket on UNSAT
+- **Piper TTS model download** updated to `en_US-lessac-medium` via `huggingface_hub` (was broken `kokoro` model)
+- **Local HTTP server** (T035): new `voicevision-server` command exposing `GET /health`, `POST /transcribe`, `POST /describe` and `POST /converse` as JSON. Standard library only, binds `127.0.0.1` by default, optional bearer auth via `VOICEVISION_SERVER_TOKEN`, 10 MiB body cap
+- **WebSocket streaming** (T036): `GET /stream` accepts `audio` frames and streams `transcript` → `token` → `done`, plus `reset`, ping/pong and close. Minimal RFC 6455 codec in `voicevision.websocket` with no new dependency; unmasked/fragmented/oversized frames close with the RFC code
+- **Python client and Home Assistant integration** (T037): `voicevision.client` is a standard-library client for the local API, including WebSocket streaming. `integrations/homeassistant/` adds `voicevision.converse`, `voicevision.transcribe` and `voicevision.describe` services that fire a `voicevision_response` event
+- **VS Code extension** (T038): `integrations/vscode/` adds Dictate, Transcribe Audio File and Ask About Selection commands. Plain JavaScript, no build step; dictation shells out to `voicevision-listen`, the other two use the local HTTP server
+- **Obsidian plugin and Notion export** (T039): `integrations/obsidian/` adds Transcribe audio file and Ask about selection commands plus a settings tab; `integrations/notion/` exports a transcript (or locally transcribed audio) to a Notion page. Notion export is the only opt-in cloud step — inference stays local and the token comes from `NOTION_TOKEN`
 
 ### Fixed
 
-- Single-shot wake word mode no longer raises `AssertionError` when it hears
-  speech that does not contain the wake word (`_transcribe_utterances` now
-  returns `None` instead of a `(None, None)` tuple)
-- `tests/backends/test_vad.py` and `tests/test_vision.py` no longer depend on
-  optional packages being installed or absent in the running environment
-- `make code-check` no longer scans generated `*.egg-info` directories when
-  looking for `TODO:` / `FIXME:` markers
-- mypy no longer fails on missing stubs for optional dependencies
-  (`webrtcvad`, `httpx`, `playwright`)
+- Single-shot wake word mode no longer raises `AssertionError` when it hears speech that does not contain the wake word (`_transcribe_utterances` now returns `None` instead of a `(None, None)` tuple)
+- `tests/backends/test_vad.py` and `tests/test_vision.py` no longer depend on optional packages being installed or absent in the running environment
+- `make code-check` no longer scans generated `*.egg-info` directories when looking for `TODO:` / `FIXME:` markers
+- mypy no longer fails on missing stubs for optional dependencies (`webrtcvad`, `httpx`, `playwright`)
+- Piper TTS: replaced corrupted model files with valid `en_US-lessac-medium` via `huggingface_hub`
+- Island graph epistemic contradictions resolved (C-200, C-206, C-403 states corrected; edge C-403→C-206 changed from `factual` to `not`)
 
 ### Documentation
 
-- `README.md` and `docs/VOICE_INPUT.md` document `--json`, `--quiet`,
-  `VOICEVISION_QUIET`, and the local HTTP server
-- `CLAUDE.md` non-goals updated: the optional HTTP server is localhost-only by
-  default, and history is opt-in rather than forbidden
+- `README.md` updated: Piper model URLs fixed, new feature sections added (custom hotwords, mute TTS, auto language, emotion, speaker ID, AES skills)
+- `README.md` version history updated with v0.2.2
+- `CHANGELOG.md` consolidated all recent changes
+- `CLAUDE.md` non-goals updated: optional HTTP server is localhost-only by default, history is opt-in rather than forbidden
+- `docs/VOICE_INPUT.md` documents `--json`, `--quiet`, `VOICEVISION_QUIET`, and the local HTTP server
 
 ## [0.2.2] - 2026-11-07
 
