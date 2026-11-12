@@ -286,18 +286,32 @@ class VoicePipeline:
             yield from self._process_transcript_sync(transcript, prompt)
 
     def _stream_transcript(self, transcript: str, prompt: str) -> Iterator[bytes]:
-        """Stream transcription: LLM → TTS chunks as they arrive."""
+        """Stream transcription: LLM → TTS sentence-by-sentence as they arrive."""
         full_response = ""
+        synthesized_until = 0  # Track how much of full_response has been synthesized
+
         for chunk in self.llm.complete_stream(prompt):
             full_response += chunk
-            if chunk.strip():
-                # Filter thinking traces from accumulated text
-                if self.config.enable_thinking_filter:
-                    filtered = self._filter_thinking(full_response)
-                    if filtered.strip() and not self.config.mute_tts:
-                        yield self.tts.synthesize(filtered)
-                elif not self.config.mute_tts:
-                    yield self.tts.synthesize(chunk)
+            if not chunk.strip():
+                continue
+
+            # Apply thinking filter if enabled
+            if self.config.enable_thinking_filter:
+                filtered = self._filter_thinking(full_response)
+                if not filtered.strip():
+                    continue
+                text_to_process = filtered
+            else:
+                text_to_process = full_response
+
+            # Extract complete sentences from the new text
+            new_text = text_to_process[synthesized_until:]
+            sentences = self._extract_sentences(new_text)
+
+            for sentence in sentences:
+                if sentence.strip() and not self.config.mute_tts:
+                    yield self.tts.synthesize(sentence)
+                synthesized_until += len(sentence)
 
         # Store in conversation history
         if full_response.strip():
@@ -412,6 +426,82 @@ class VoicePipeline:
         text = re.sub(r"^thinking\.\.\.", "", text, flags=re.DOTALL)
         text = re.sub(r"^thinking…", "", text, flags=re.DOTALL)
         return text.strip()
+
+    def _extract_sentences(self, text: str) -> list[str]:
+        """Extract complete sentences from text using proper boundary detection.
+
+        Handles common edge cases:
+        - Abbreviations (Dr., Sr., etc.) - not sentence endings
+        - Ellipsis (...) - not sentence endings
+        - Quotes and parentheses - handle nesting
+        - Multiple punctuation (!?, ...)
+
+        Args:
+            text: Input text to split into sentences
+
+        Returns:
+            List of complete sentences (stripped, no trailing space)
+        """
+        if not text.strip():
+            return []
+
+        sentences = []
+        current = []
+        paren_depth = 0
+        in_quotes = False
+        quote_char = None
+
+        for i, ch in enumerate(text):
+            current.append(ch)
+
+            # Track parentheses
+            if ch == '(':
+                paren_depth += 1
+            elif ch == ')':
+                paren_depth = max(0, paren_depth - 1)
+
+            # Track quotes
+            if ch in ('"', "'", '«', '»', '„', '“', '”'):
+                if not in_quotes:
+                    in_quotes = True
+                    quote_char = ch
+                elif ch == quote_char:
+                    in_quotes = False
+                    quote_char = None
+
+            # Check for sentence endings
+            if ch in '.!?':
+                # Check for ellipsis
+                if i + 2 < len(text) and text[i:i+3] == '...':
+                    continue
+
+                # Check for common abbreviations (simple heuristic)
+                # Look back for common patterns like "Dr.", "Sr.", "etc."
+                if ch == '.':
+                    # Look back for abbreviation pattern
+                    word_end = i
+                    word_start = word_end
+                    while word_start > 0 and text[word_start - 1].isalpha():
+                        word_start -= 1
+                    word = text[word_start:word_end].lower()
+                    if word in ('dr', 'sr', 'sra', 'srta', 'prof', 'profª', 'profº',
+                                'etc', 'ex', 'p', 'pp', 'cap', 'art', 'inc',
+                                'ltd', 'sa', 'eua', 'uk', 'br', 'sp', 'rj'):
+                        continue  # Not a sentence end
+
+                # Only split if not inside quotes or parentheses
+                if paren_depth == 0 and not in_quotes:
+                    sentence = ''.join(current).strip()
+                    if sentence:
+                        sentences.append(sentence)
+                    current = []
+
+        # Handle remaining text (incomplete sentence)
+        remaining = ''.join(current).strip()
+        if remaining:
+            sentences.append(remaining)
+
+        return sentences
 
     def close(self) -> None:
         """Release all backend resources."""
