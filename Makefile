@@ -8,7 +8,7 @@
         format-ruff \
         docs-check code-check test-check lint-check \
         verify-implementation \
-        install-precommit install-voice-input \
+        install-precommit install-voice-input download-models \
         aes-plan aes-build aes-verify aes-review aes-learn \
         aes-wake aes-sleep aes-preflight aes-conflict
 
@@ -38,6 +38,11 @@ install-precommit:
 install-voice-input:
 	@echo "Installing voice-input system dependencies (requires sudo)..."
 	@sudo sh "$(CURDIR)/install-voice-input.sh"
+
+# Allow passing model groups as arguments to make download-models
+# Usage: make download-models MODELS=stt or make download-models MODELS="stt llm"
+download-models:
+	@python3 "$(CURDIR)/scripts/download-models.py" $(MODELS)
 
 # --- Run ---
 run:
@@ -175,6 +180,8 @@ help:
 	@echo "  Setup:"
 	@echo "    make setup              Install deps (uv or pip)"
 	@echo "    make install-precommit  Install git hooks"
+	@echo "    make install-voice-input  Install system deps (sudo)"
+	@echo "    make download-models    Download all models (or: make download-models stt llm tts)"
 	@echo ""
 	@echo "  Development:"
 	@echo "    make run                Run main entry point"
