@@ -6,8 +6,12 @@ callable that accepts audio bytes and returns synthesized speech bytes.
 
 from __future__ import annotations
 
+import json
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, cast
 
 from voicevision.backends.emotion import EmotionResult, SimpleEmotionBackend
@@ -56,6 +60,9 @@ class PipelineConfig:
 
     # Conversation memory
     max_context_utterances: int = 5
+    conversation_path: str = ""
+    conversation_ttl_days: int = 30
+    max_history_size: int = 100
 
     # Streaming
     streaming_enabled: bool = False
@@ -83,8 +90,81 @@ class VoicePipeline:
         self._tts: Any = None
         self._vision: Any = None
 
-        # Conversation memory
+        # Conversation memory persistence
+        self._conversation_path: Path | None = None
+        self._conversation_lock = threading.Lock()
         self._conversation_history: list[tuple[str, str]] = []
+
+        if self.config.conversation_path:
+            self._conversation_path = Path(self.config.conversation_path).expanduser()
+            self.load_context()
+
+    # -- Conversation persistence ----------------------------------------------
+
+    def load_context(self) -> None:
+        """Load conversation history from disk.
+
+        Loads JSONL file with format:
+        {"timestamp": "2026-11-12T10:30:00Z", "user": "hello", "assistant": "hi"}
+        """
+        if not self._conversation_path or not self._conversation_path.exists():
+            self._conversation_history = []
+            return
+
+        with self._conversation_lock:
+            history: list[tuple[str, str]] = []
+            cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.conversation_ttl_days)
+
+            with self._conversation_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        # Check TTL
+                        ts_str = entry.get("timestamp", "")
+                        if ts_str:
+                            try:
+                                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                                if ts < cutoff:
+                                    continue  # Expired, skip
+                            except ValueError:
+                                pass
+                        user = entry.get("user", "")
+                        assistant = entry.get("assistant", "")
+                        if user or assistant:
+                            history.append((user, assistant))
+                    except json.JSONDecodeError:
+                        continue
+
+            # Enforce max history size (keep most recent)
+            max_size = self.config.max_history_size
+            if len(history) > max_size:
+                history = history[-max_size:]
+
+            self._conversation_history = history
+
+    def save_context(self) -> None:
+        """Save conversation history to disk as JSONL."""
+        if not self._conversation_path:
+            return
+
+        with self._conversation_lock:
+            # Apply size limit before saving (TTL applied on load)
+            history = self._conversation_history[-self.config.max_history_size :]
+
+            # Ensure parent directory exists
+            self._conversation_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with self._conversation_path.open("w", encoding="utf-8") as f:
+                for user_text, assistant_text in history:
+                    entry = {
+                        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "user": user_text,
+                        "assistant": assistant_text,
+                    }
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # -- lazy backend accessors ------------------------------------------------
 
@@ -400,8 +480,10 @@ class VoicePipeline:
         return "\n".join(lines) + "\n"
 
     def reset_context(self) -> None:
-        """Clear conversation history."""
+        """Clear conversation history and saved file."""
         self._conversation_history = []
+        if self._conversation_path and self._conversation_path.exists():
+            self._conversation_path.unlink(missing_ok=True)
 
     def _filter_thinking(self, text: str) -> str:
         """Strip qwen3 reasoning traces from LLM output.
@@ -504,8 +586,8 @@ class VoicePipeline:
         return sentences
 
     def close(self) -> None:
-        """Release all backend resources."""
-        self.reset_context()
+        """Release all backend resources and save conversation context."""
+        self.save_context()
         for backend in (
             self._vad,
             self._stt,
