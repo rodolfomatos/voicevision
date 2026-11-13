@@ -16,6 +16,7 @@ from typing import Any, cast
 
 from voicevision.backends.emotion import EmotionResult, SimpleEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
+from voicevision.backends.onnx_vision import OnnxVisionBackend
 from voicevision.backends.piper import PiperBackend
 from voicevision.backends.speaker import SimpleSpeakerBackend
 from voicevision.backends.vad import WebrtcVadBackend
@@ -53,7 +54,10 @@ class PipelineConfig:
     tts_length_scale: float = 1.0
 
     # Vision
+    vision_backend: str = "llama-cpp"
     vision_model: str = ""
+    vision_host: str = "127.0.0.1"
+    vision_port: int = 8081
 
     # Filter
     enable_thinking_filter: bool = True
@@ -218,14 +222,20 @@ class VoicePipeline:
         return cast(PiperBackend, self._tts)
 
     @property
-    def vision(self) -> MoondreamBackend:
+    def vision(self) -> Any:
         if self._vision is None:
             if not self.config.vision_model:
                 raise ValueError("vision_model must be configured")
-            self._vision = MoondreamBackend(
-                model=self.config.vision_model,
-            )
-        return cast(MoondreamBackend, self._vision)
+            if self.config.vision_backend == "onnx":
+                self._vision = OnnxVisionBackend(
+                    model=self.config.vision_model,
+                    providers=["CPUExecutionProvider"],
+                )
+            else:
+                self._vision = MoondreamBackend(
+                    model=self.config.vision_model,
+                )
+        return self._vision
 
     # -- public API ------------------------------------------------------------
 
@@ -461,7 +471,7 @@ class VoicePipeline:
             return b""
 
         # 2b. No LLM configured: return description as text (no TTS)
-        return description.encode("utf-8")
+        return cast(bytes, description.encode("utf-8"))
 
     def _build_conversation_context(self) -> str:
         """Build conversation context from recent history.

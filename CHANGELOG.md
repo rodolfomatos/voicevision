@@ -24,7 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **WebSocket streaming** (T036): `GET /stream` accepts `audio` frames and streams `transcript` → `token` → `done`, plus `reset`, ping/pong and close. Minimal RFC 6455 codec in `voicevision.websocket` with no new dependency; unmasked/fragmented/oversized frames close with the RFC code
 - **Python client and Home Assistant integration** (T037): `voicevision.client` is a standard-library client for the local API, including WebSocket streaming. `integrations/homeassistant/` adds `voicevision.converse`, `voicevision.transcribe` and `voicevision.describe` services that fire a `voicevision_response` event
 - **VS Code extension** (T038): `integrations/vscode/` adds Dictate, Transcribe Audio File and Ask About Selection commands. Plain JavaScript, no build step; dictation shells out to `voicevision-listen`, the other two use the local HTTP server
-- **Obsidian plugin and Notion export** (T039): `integrations/obsidian/` adds Transcribe audio file and Ask about selection commands plus a settings tab; `integrations/notion/` exports a transcript (or locally transcribed audio) to a Notion page. Notion export is the only opt-in cloud step — inference stays local and the token comes from `NOTION_TOKEN`
+- **Obsidian plugin and Notion export** (T039): `integrations/obsidian/` adds
+  Transcribe audio file and Ask about selection commands plus a settings tab;
+  `integrations/notion/` exports a transcript (or locally transcribed audio)
+  to a Notion page. Notion export is the only opt-in cloud step — inference
+  stays local and the token comes from `NOTION_TOKEN`
+- **ONNX Runtime vision backend** (T044/B6): `src/voicevision/backends/onnx_vision.py`
+  adds `OnnxVisionBackend` for ONNX Runtime vision inference, sharing the ONNX
+  Runtime dependency with Piper TTS. `PipelineConfig.vision_backend` selects
+  `onnx` or `llama-cpp` (default). Tests with mocked ONNX Runtime.
+- - **Obsidian plugin and Notion export** (T039): `integrations/obsidian/` adds Transcribe audio file and Ask about selection commands plus a settings tab; `integrations/notion/` exports a transcript (or locally transcribed audio) to a Notion page. Notion export is the only opt-in cloud step — inference stays local and the token comes from `NOTION_TOKEN`
 - **Sentence-by-sentence streaming LLM → TTS** (T041/B1): `_stream_transcript` now splits LLM response into sentences using proper boundary detection; only sends newly synthesized sentences to TTS; handles abbreviations, ellipsis, quotes, parentheses
 - **Conversation memory persistence** (T042/B2): `PipelineConfig` gains `conversation_path`, `conversation_ttl_days`, `max_history_size`; `VoicePipeline.load_context()` / `save_context()` with thread-safe locking; JSONL format; TTL expiry on load; size limit on save; auto-save on close/`__exit__`
 - **Model download helper** (`make download-models`): `scripts/download_models.py` downloads all models via `huggingface_hub`; supports model groups (`stt`, `llm`, `tts`, `vision`, `voice-loop`, `full`, `all`) and individual models; skips existing files

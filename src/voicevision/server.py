@@ -42,6 +42,7 @@ from voicevision import __version__
 from voicevision.audio import pcm16_to_wav, require_whisper_format
 from voicevision.backends.emotion import SimpleEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
+from voicevision.backends.onnx_vision import OnnxVisionBackend
 from voicevision.backends.speaker import SimpleSpeakerBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
@@ -127,6 +128,7 @@ class ServerConfig:
     vision_model: str = ""
     vision_host: str = "127.0.0.1"
     vision_port: int = 8081
+    vision_backend: str = "llama-cpp"
 
     # Emotion detection
     emotion_enabled: bool = False
@@ -157,6 +159,7 @@ def load_config() -> ServerConfig:
         vision_model=os.environ.get("VOICEVISION_VISION_MODEL", ""),
         vision_host=os.environ.get("VOICEVISION_VISION_HOST", "127.0.0.1"),
         vision_port=_env_int("VOICEVISION_VISION_PORT", 8081),
+        vision_backend=os.environ.get("VOICEVISION_VISION_BACKEND", "llama-cpp"),
         emotion_enabled=_env_bool("VOICEVISION_EMOTION", False),
         speaker_enabled=_env_bool("VOICEVISION_SPEAKER", False),
     )
@@ -227,7 +230,7 @@ class VoiceVisionService:
         # and switching it per request would spawn a process each time.
         self._stt: dict[str, WhisperCppBackend] = {}
         self._llm: LlamaCppBackend | None = None
-        self._vision: MoondreamBackend | None = None
+        self._vision: MoondreamBackend | OnnxVisionBackend | None = None
 
     def transcribe(self, wav: bytes, language: str) -> tuple[str, float]:
         """Transcribe WAV audio; return the transcript and elapsed ms."""
@@ -267,11 +270,16 @@ class VoiceVisionService:
                 "VOICEVISION_VISION_MODEL is not set — cannot describe images"
             )
         if self._vision is None:
-            self._vision = MoondreamBackend(
-                model=self.config.vision_model,
-                host=self.config.vision_host,
-                port=self.config.vision_port,
-            )
+            if self.config.vision_backend == "onnx":
+                self._vision = OnnxVisionBackend(
+                    model=self.config.vision_model,
+                )
+            else:
+                self._vision = MoondreamBackend(
+                    model=self.config.vision_model,
+                    host=self.config.vision_host,
+                    port=self.config.vision_port,
+                )
         return self._vision.describe(image, prompt=question)
 
     def converse(self, text: str, max_tokens: int) -> str:
