@@ -354,6 +354,22 @@ curl -s http://127.0.0.1:8765/transcribe \
 
 ---
 
+# 📖 Documentação completa
+
+O `docs/USAGE.md` contém um guia completo com exemplos práticos de uso da
+biblioteca voicevision, incluindo:
+
+- Instalação passo a passo
+- Listen mode (ditando para qualquer editor)
+- Servidor HTTP local e cliente Python
+- Pipeline completo com `VoicePipeline`
+- Todas as integrações (Home Assistant, VS Code, Obsidian, Notion)
+- Solução de problemas comuns
+
+Leia antes de começar a usar o projeto em produção.
+
+---
+
 # 📦 Project Documentation
 
 | File | Description |

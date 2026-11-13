@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `README.md` updated: Piper model URLs fixed, new feature sections added (custom hotwords, mute TTS, auto language, emotion, speaker ID, AES skills)
 - `README.md` version history updated with v0.2.2
+- `README.md` updated: version history updated with v0.3.0
+- `docs/USAGE.md` added: complete usage guide with listen mode, HTTP server, Python client, integrations, and troubleshooting
+- `README.md` updated: quick reference to `docs/USAGE.md`
 - `CHANGELOG.md` consolidated all recent changes
 - `CLAUDE.md` non-goals updated: optional HTTP server is localhost-only by default, history is opt-in rather than forbidden
 - `docs/VOICE_INPUT.md` documents `--json`, `--quiet`, `VOICEVISION_QUIET`, and the local HTTP server
