@@ -344,6 +344,64 @@ Ready-to-use clients live in [`integrations/`](integrations/):
 Each directory has its own README with installation and usage instructions.
 
 
+## MCP Server (stdio)
+
+`voicevision-mcp` expõe as capacidades do voicevision como ferramentas MCP (Model Context
+Protocol), permitindo que agentes de IA usem o voicevision como ferramenta
+através de JSON-RPC over stdio:
+
+```bash
+voicevision-mcp
+```
+
+Ferramentas expostas:
+
+| Ferramenta | Descrição |
+|-----------|-----------|
+| `transcribe_audio` | Transcreve áudio em base64 (WAV, 16 kHz mono PCM16) para texto |
+| `describe_image` | Descreve imagem ou responde pergunta sobre ela |
+| `converse_text` | Envia texto para o LLM |
+| `health_check` | Verifica status do servidor voicevision |
+
+Exemplo de chamada MCP:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "transcribe_audio",
+    "arguments": {
+      "audio_base64": "<base64-encoded-wav>",
+      "language": "pt"
+    }
+  }
+}
+```
+
+Resposta:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"transcript\": \"Olá, como vai você?\", \"language\": \"pt\", \"transcription_ms\": 850.2}"
+      }
+    ]
+  }
+}
+```
+
+O servidor MCP roda via stdio e é ideal para integração com clientes MCP (Claude, OpenCode, etc.) que suportam o protocolo MCP.
+
+---
+
+
 ```bash
 # Example: transcribe a WAV file
 base64 -w0 speech.wav > /tmp/audio.b64

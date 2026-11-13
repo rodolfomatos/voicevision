@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Conversation memory persistence** (T042/B2): `PipelineConfig` gains `conversation_path`, `conversation_ttl_days`, `max_history_size`; `VoicePipeline.load_context()` / `save_context()` with thread-safe locking; JSONL format; TTL expiry on load; size limit on save; auto-save on close/`__exit__`
 - **Model download helper** (`make download-models`): `scripts/download_models.py` downloads all models via `huggingface_hub`; supports model groups (`stt`, `llm`, `tts`, `vision`, `voice-loop`, `full`, `all`) and individual models; skips existing files
 - **Benchmark suite** (T043/B3): `scripts/benchmark.py` measures TTFT (STT + LLM), RTF (TTS), RSS; `make benchmark MODELS=...` target; outputs JSON/CSV; supports iterations, warmup, dry-run
+- **MCP server** (T044): `src/voicevision/backends/mcp_server.py` — stdio MCP server exposing `transcribe_audio`, `describe_image`, `converse_text`, `health_check` tools; `Makefile` `make mcp-server` target; `pyproject.toml` console script
 
 ### Fixed
 
