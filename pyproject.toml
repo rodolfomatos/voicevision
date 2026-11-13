@@ -77,6 +77,7 @@ voicevision-preflight = "voicevision.preflight:main"
 voicevision-listen = "voicevision.listen:main"
 voicevision-history = "voicevision.history:main"
 voicevision-server = "voicevision.server:main"
+voicevision-mcp = "voicevision.backends.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

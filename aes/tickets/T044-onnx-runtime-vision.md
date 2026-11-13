@@ -75,3 +75,23 @@ Set `vision_backend=llama-cpp` (default) to use existing backend
 - `tests/backends/test_onnx_vision.py` with mocked ONNX Runtime, PIL, and numpy
 - Add `onnxruntime`, `PIL` to mypy overrides in pyproject.toml
 - All 11 tests pass, quality gates pass
+
+## Implementation notes
+
+- Added  with 
+- ONNX Runtime inference for vision-language models (shares ONNX Runtime with Piper TTS)
+-  config option:  (default) or 
+-  instantiates correct backend based on config
+-  with mocked ONNX Runtime, PIL, and numpy
+- Added ,  to mypy overrides in pyproject.toml
+- All 11 tests pass, quality gates pass
+
+## Implementation notes
+
+- Added `src/voicevision/backends/onnx_vision.py` with `OnnxVisionBackend`
+- ONNX Runtime inference for vision-language models (shares ONNX Runtime with Piper TTS)
+- `PipelineConfig.vision_backend` config option: `llama-cpp` (default) or `onnx`
+- `VoiceVisionService.vision` instantiates the correct backend based on config
+- `tests/backends/test_onnx_vision.py` with mocked ONNX Runtime, PIL, and numpy
+- Add `onnxruntime`, `PIL` to mypy overrides in pyproject.toml
+- All 11 tests pass, quality gates pass

@@ -10,7 +10,7 @@
         verify-implementation \
         install-precommit install-voice-input download-models benchmark \
         aes-plan aes-build aes-verify aes-review aes-learn \
-        aes-wake aes-sleep aes-preflight aes-conflict
+        aes-wake aes-sleep aes-preflight aes-conflict aes-mcp-server
 
 # --- Configurable commands ---
 AES_LANGUAGE ?= python
@@ -91,6 +91,10 @@ build:
 # AES Preflight gate
 aes-preflight:
 	@bash ~/.config/opencode/skills/aes-preflight/preflight.sh
+
+# AES MCP server
+aes-mcp-server:
+	@voicevision-mcp
 
 # AES Conflict gate
 aes-conflict:
@@ -203,6 +207,9 @@ help:
 	@echo ""
 	@echo "  Benchmarking:"
 	@echo "    make benchmark MODELS=voice-loop    Run benchmarks (MODELS=stt|llm|tts|vision|voice-loop|full)"
+	@echo ""
+	@echo "  MCP Server:"
+	@echo "    make aes-mcp-server    Run voicevision MCP server (stdio)"
 	@echo ""
 	@echo "  AES Project Mode:"
 	@echo "    make aes-wake           Load context (start of session)"

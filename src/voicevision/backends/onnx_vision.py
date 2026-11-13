@@ -3,21 +3,17 @@
 Uses ONNX Runtime (shared with Piper TTS) to run vision-language models
 directly in-process, avoiding the overhead of a separate llama.cpp subprocess.
 
-This is an alternative to ``MoondreamBackend`` (which uses llama.cpp as a
-subprocess). The ONNX backend keeps everything in-process: load the model
-once, run inference on each image.
+This is an alternative to :class:`MoondreamBackend` (which uses llama.cpp as a
+subprocess). The model is never downloaded by this package — the operator must
+supply the ONNX model file and set ``VOICEVISION_VISION_MODEL``.
 
-The model must be an ONNX-format vision-language model (e.g. moondream2
-converted to ONNX). The model file is supplied by the caller; this class
-never downloads anything.
-
-All heavy dependencies (onnxruntime, pillow, numpy) are probed lazily so
+All heavy dependencies (onnxruntime, Pillow, numpy) are probed lazily so
 ``import voicevision.backends.onnx_vision`` stays cheap.
 """
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Final
+from typing import Any, Final
 
 from voicevision.errors import BackendExecutionError
 
@@ -29,7 +25,7 @@ class OnnxVisionBackend:
     """Describe and answer questions about images via ONNX Runtime.
 
     Loads an ONNX vision-language model once and keeps it resident in memory,
-    avoiding the subprocess spawn overhead of ``MoondreamBackend`` on every
+    avoiding the subprocess spawn overhead of :class:`MoondreamBackend` on every
     request.
 
     The model is never downloaded by this package — the operator must supply
@@ -38,10 +34,10 @@ class OnnxVisionBackend:
     Example::
 
         backend = OnnxVisionBackend(model="/models/moondream2.onnx")
-        description = backend.describe(image_bytes, "What is in this image?")
+        description = backend.describe(image_bytes, "What is this?")
     """
 
-    install_hint: ClassVar[str] = (
+    install_hint: str = (
         "Install ONNX Runtime vision model: download an ONNX-format "
         "vision-language model (e.g. moondream2.onnx) and set "
         "VOICEVISION_VISION_MODEL to its path. Install dependencies: "
@@ -53,7 +49,6 @@ class OnnxVisionBackend:
         *,
         model: str,
         providers: list[str] | None = None,
-        **kwargs: object,
     ) -> None:
         if not model:
             raise ValueError("model path is required — this backend does not download models")
@@ -63,13 +58,11 @@ class OnnxVisionBackend:
 
     @classmethod
     def available(cls) -> bool:
-        """Return True if onnxruntime is installed.
-
-        Pillow and numpy are only needed at inference time, not for the
-        backend to be considered available.
-        """
+        """Return True if ONNX Runtime and Pillow are installed."""
         try:
-            import onnxruntime  # noqa: F401, PLC0415 - lazy import per CLAUDE.md # type: ignore
+            import numpy  # noqa: F401, PLC0415 - lazy import per CLAUDE.md # type: ignore[import, import-untyped]
+            import onnxruntime  # noqa: F401, PLC0415 - lazy import per CLAUDE.md # type: ignore[import, import-untyped]
+            import PIL  # noqa: F401, PLC0415 - lazy import per CLAUDE.md # type: ignore[import, import-not-found]
             return True
         except ImportError:
             return False
@@ -77,7 +70,7 @@ class OnnxVisionBackend:
     def _ensure_session(self) -> Any:
         """Lazy-load the ONNX session on first use."""
         if self._session is None:
-            import onnxruntime  # noqa: PLC0415 - lazy import per CLAUDE.md # type: ignore
+            import onnxruntime  # noqa: PLC0415 - lazy import per CLAUDE.md # type: ignore[import, import-untyped]
 
             try:
                 self._session = onnxruntime.InferenceSession(
@@ -118,8 +111,8 @@ class OnnxVisionBackend:
         try:
             import io  # noqa: PLC0415 - standard library, lazy for import cost
 
-            import numpy as np  # noqa: PLC0415 - lazy import per CLAUDE.md # type: ignore
-            from PIL import Image  # noqa: PLC0415 - lazy import per CLAUDE.md # type: ignore
+            import numpy as np  # noqa: PLC0415 - lazy import per CLAUDE.md # type: ignore[import, import-untyped]
+            from PIL import Image  # noqa: PLC0415 - lazy import per CLAUDE.md # type: ignore[import, import-not-found]
         except ImportError as exc:
             raise BackendExecutionError(
                 "onnxvision",
