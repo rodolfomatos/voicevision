@@ -21,6 +21,7 @@ import json
 import sys
 from typing import Any
 
+from voicevision.backends.piper import PiperBackend
 from voicevision.server import ServerConfig, VoiceVisionService
 
 
@@ -34,6 +35,7 @@ class MCPServer:
     ) -> None:
         self.config = config
         self.service = service or VoiceVisionService(config)
+        self._tts_backend: PiperBackend | None = None
 
     # -- Protocol -----------------------------------------------------------
 
@@ -98,7 +100,7 @@ class MCPServer:
                 "tools": [
                     {
                         "name": "transcribe_audio",
-                        "description": "Transcreve áudio em base64 (WAV, 16 kHz mono PCM16) para texto",
+                        "description": "Transcreve áudio em base64 para texto",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -108,7 +110,10 @@ class MCPServer:
                                 },
                                 "language": {
                                     "type": "string",
-                                    "description": "Código do idioma (pt, en, etc.) ou 'auto' para detecção automática",
+                                    "description": (
+                                        "Código do idioma (pt, en, etc.) "
+                                        "ou 'auto' para detecção automática"
+                                    ),
                                 },
                             },
                             "required": ["audio_base64"],
@@ -168,7 +173,9 @@ class MCPServer:
                 try:
                     result = self._tools[name](**arguments)
                     self._send_response(request_id, {
-                        "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
+                        "content": [{"type": "text", "text": json.dumps(
+                            result, ensure_ascii=False
+                        )}],
                     })
                 except Exception as exc:
                     self._send_error(request_id, -32603, f"Internal error: {exc}")
@@ -215,6 +222,21 @@ class MCPServer:
     def _health_check(self) -> dict[str, Any]:
         """Verifica status do servidor."""
         return {"status": "ok", "version": "0.3.0"}
+
+    def _get_tts_backend(self) -> PiperBackend:
+        """Retorna backend de TTS, criando se necessário."""
+        if self._tts_backend is None:
+            if not self.config.tts_model:
+                from voicevision.errors import ConfigurationError
+
+                raise ConfigurationError(
+                    "VOICEVISION_TTS_MODEL is not set — cannot synthesize speech"
+                )
+            self._tts_backend = PiperBackend(
+                model=self.config.tts_model,
+                voice=self.config.tts_voice,
+            )
+        return self._tts_backend
 
     # -- Tool registry ------------------------------------------------------
 

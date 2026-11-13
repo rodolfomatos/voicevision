@@ -1,8 +1,9 @@
-# voicevision — Makefile
-# Runs quality gates per AES protocol: make check
+# voicevision — AES (Ambrósio Engineering System) Makefile
+# Runs quality gates per AES protocol
 # Usage: make <target> [AES_LANGUAGE=python]
+# Default target: show help
 
-.PHONY: setup run test lint format build check doctor help clean \
+.PHONY: all setup run test lint format build check doctor help clean \
         test-unit test-integration test-coverage \
         lint-ruff lint-mypy lint-bandit \
         format-ruff \
@@ -10,7 +11,8 @@
         verify-implementation \
         install-precommit install-voice-input download-models benchmark \
         aes-plan aes-build aes-verify aes-review aes-learn \
-        aes-wake aes-sleep aes-preflight aes-conflict aes-mcp-server
+        aes-wake aes-sleep aes-preflight aes-conflict aes-mcp-server \
+        download-models benchmark
 
 # --- Configurable commands ---
 AES_LANGUAGE ?= python
@@ -26,9 +28,24 @@ AES_RUN ?= python -m src.main || python src/main.py
 
 export AES_LANGUAGE AES_LINT_RUFF AES_LINT_MYPY AES_TEST_UNIT AES_FORMAT AES_BUILD AES_RUN
 
+# ============================================================================
+# Default target: show help when running `make` without arguments
+# ============================================================================
+.PHONY: all
+all: help
+
 # --- Setup ---
 setup:
 	@echo "Setting up $(AES_LANGUAGE) environment..."
+	@echo ""
+	@echo "NOTE: voicevision requires a Python virtual environment (PEP 668)."
+	@echo "      If you haven't created one yet, run:"
+	@echo ""
+	@echo "        python3 -m venv .venv"
+	@echo "        source .venv/bin/activate"
+	@echo ""
+	@echo "Then run: make setup"
+	@echo ""
 	@uv sync 2>/dev/null || pip install -e ".[dev]"
 
 install-precommit:

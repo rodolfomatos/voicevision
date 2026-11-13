@@ -158,8 +158,18 @@ class TestConstruction:
         with pytest.raises(ValueError, match="model path is required"):
             OnnxVisionBackend(model="")
 
-    def test_available_with_onnxruntime(self) -> None:
-        # onnxruntime não está instalado no ambiente de teste
+    def test_available_with_onnxruntime(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "onnxruntime" or name.startswith("onnxruntime."):
+                raise ImportError("No module named 'onnxruntime'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        sys.modules.pop("onnxruntime", None)
         assert OnnxVisionBackend.available() is False
 
     def test_accepts_custom_providers(self) -> None:

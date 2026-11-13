@@ -130,6 +130,10 @@ class ServerConfig:
     vision_port: int = 8081
     vision_backend: str = "llama-cpp"
 
+    # TTS
+    tts_model: str = ""
+    tts_voice: str = ""
+
     # Emotion detection
     emotion_enabled: bool = False
 
@@ -162,6 +166,10 @@ def load_config() -> ServerConfig:
         vision_backend=os.environ.get("VOICEVISION_VISION_BACKEND", "llama-cpp"),
         emotion_enabled=_env_bool("VOICEVISION_EMOTION", False),
         speaker_enabled=_env_bool("VOICEVISION_SPEAKER", False),
+
+        # TTS
+        tts_model=os.environ.get("VOICEVISION_TTS_MODEL", ""),
+        tts_voice=os.environ.get("VOICEVISION_TTS_VOICE", ""),
     )
 
 
