@@ -1,9 +1,8 @@
-# Roadmap
-
 # voicevision Roadmap
 
 Scope: v0.1 = voice loop (VAD → STT → LLM → filter → TTS), Ubuntu/RPi,
 subprocess backends. Vision returns in v0.2 behind unchanged interfaces.
+Local HTTP server, WebSocket streaming, and MCP client added in v0.2.x.
 
 ---
 
@@ -98,6 +97,56 @@ perceived latency. ✅
 
 ---
 
+## Sprint 7 — External interfaces & server (v0.2.x) ✅ Done
+
+| ID | Task | Status |
+|----|------|--------|
+| T025 | JSON output (`--json`) | **done** |
+| T026 | `--quiet` / `VOICEVISION_QUIET` | **done** |
+| T027 | Transcript history | **done** |
+| T028 | Custom hotword file | **done** |
+| T029 | Mute TTS flag | **done** |
+| T030 | Continuous wake word mode | **done** |
+| T031 | Multiple wake words | **done** |
+| T032 | Auto language detection | **done** |
+| T033 | Emotion detection | **done** |
+| T034 | Speaker identification | **done** |
+| T035 | Local HTTP server | **done** |
+| T036 | WebSocket streaming | **done** |
+| T037 | Home Assistant integration | **done** |
+| T038 | VS Code extension | **done** |
+| T039 | Obsidian plugin + Notion export | **done** |
+
+**Exit criteria:** server binds `127.0.0.1` by default, optional bearer auth,
+WebSocket streaming works, integrations are structurally validated. ✅
+
+---
+
+## Sprint 8 — API surface & client libraries ✅ Done
+
+| ID | Task | Status |
+|----|------|--------|
+| T039 | Home Assistant custom component | **done** |
+| T040 | VS Code extension | **done** |
+| T041 | Streaming LLM → TTS sentence-by-sentence | **done** |
+| T042 | Conversation memory persistence | **done** |
+| T043 | Benchmark suite (TTFT, RTF, RSS) | **done** |
+| T044 | ONNX Runtime vision path | **done** |
+| T045 | MCP server (stdio) | **done** |
+
+**Exit criteria:** `make check` green, all integration tests pass, documentation
+covers all new APIs. ✅
+
+---
+
+## v0.3.0 — Released 🎉
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 0.3.0 | 2026-11-13 | Local HTTP server, WebSocket streaming, MCP stdio server, custom hotword file, mute TTS flag, multiple wake words, auto language detection, emotion detection, speaker identification, streaming LLM→TTS sentence-by-sentence, conversation memory persistence, benchmark suite (TTFT, RTF, RSS), ONNX Runtime vision backend |
+
+---
+
 ## v0.2.0 — Released 🎉
 
 | Version | Date | Changes |
@@ -108,35 +157,19 @@ perceived latency. ✅
 
 ## v0.1.0 — Released 🎉
 
-| Date | 2026-11-07 |
-|------|------------|
-| Tag | `v0.1.0` |
-| Commit | See `git log` |
-
-**What was delivered:**
-
-- Voice loop: VAD → STT → LLM → filter → TTS
-- Listen mode: microphone → STT → text
-- Wake word: configurable (default: "Olá Ambrósio")
-- Pre-roll buffer: audio before wake word detection
-- Multiple STT models: tiny/base/small/medium/large
-- Camera backends: OpenCV + Playwright
-- Vision backend: Moondream GGUF via llama.cpp
-- Describe & Answer: image → text → response → speech
-- Preflight utility: `voicevision-preflight`
-- Docker deployment: multi-stage image, docker-compose
-
-See `CHANGELOG.md` for full details.
+| Version | Date | Changes |
+|---------|------|---------|
+| 0.1.0 | 2026-11-06 | Voice loop: VAD → STT → LLM → filter → TTS; listen mode; subprocess backends; Dummy backends; preflight; quality gates |
 
 ---
 
-## v0.2 — Planned
+## v0.4 — Planned (next sprint)
 
 | ID | Task | Status |
 |----|------|--------|
-| — | Conversation memory across turns | planned |
-| — | Streaming LLM output to TTS sentence-by-sentence | planned |
-| — | Benchmark suite (TTFT, RTF, RSS) | planned |
+| — | Benchmark suite enhancements (RTF per backend, RTF trends) | planned |
+| — | Conversation memory persistence across turns | planned (T042 done, needs UI/CLI) |
+| — | Benchmark suite: TTFT, RTF, RSS per backend and quantisation | planned |
 | — | Android/Termux audio adapters | out of scope (separate project) |
 
 ---
@@ -150,14 +183,13 @@ See `CHANGELOG.md` for full details.
       only by callers that actually construct one. `tests/test_import_cost.py`
       asserts `pydantic` is absent from `sys.modules` after a bare import, so
       the optimisation cannot be silently reverted.
-- [ ] **B1** — Streaming LLM output into TTS sentence-by-sentence (needs
-      sentence-boundary detection; naive token streaming sounds broken)
-- [ ] **B2** — Conversation memory across turns (currently the caller owns it)
-- [ ] **B3** — Benchmark suite: TTFT, RTF, RSS per backend and quantisation
+- [x] **B1** — Streaming LLM output into TTS sentence-by-sentence (T041)
+- [x] **B2** — Conversation memory across turns (T042)
+- [x] **B3** — Benchmark suite: TTFT, RTF, RSS per backend and quantisation (T043)
 - [ ] **B4** — Android/Termux audio adapters — **separate project**, deliberately
       out of v0.1 scope
-- [ ] **B5** — Model download helper CLI (operator currently installs by hand)
-- [ ] **B6** — ONNX Runtime vision path, to share onnxruntime with piper
+- [x] **B5** — Model download helper CLI (`make download-models`)
+- [x] **B6** — ONNX Runtime vision path, to share onnxruntime with piper (T044)
 - [x] **B7** — Container deployment. **Done.** ADR-003 records the four
       consequences (audio pass-through, models as a volume, PID 1 signal
       handling, loopback-bound `llama-server`). Delivered:

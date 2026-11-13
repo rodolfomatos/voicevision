@@ -24,11 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **WebSocket streaming** (T036): `GET /stream` accepts `audio` frames and streams `transcript` → `token` → `done`, plus `reset`, ping/pong and close. Minimal RFC 6455 codec in `voicevision.websocket` with no new dependency; unmasked/fragmented/oversized frames close with the RFC code
 - **Python client and Home Assistant integration** (T037): `voicevision.client` is a standard-library client for the local API, including WebSocket streaming. `integrations/homeassistant/` adds `voicevision.converse`, `voicevision.transcribe` and `voicevision.describe` services that fire a `voicevision_response` event
 - **VS Code extension** (T038): `integrations/vscode/` adds Dictate, Transcribe Audio File and Ask About Selection commands. Plain JavaScript, no build step; dictation shells out to `voicevision-listen`, the other two use the local HTTP server
-- **Obsidian plugin and Notion export** (T039): `integrations/obsidian/` adds
-  Transcribe audio file and Ask about selection commands plus a settings tab;
-  `integrations/notion/` exports a transcript (or locally transcribed audio)
-  to a Notion page. Notion export is the only opt-in cloud step — inference
-  stays local and the token comes from `NOTION_TOKEN`
+- **MCP server** (T045): `src/voicevision/backends/mcp_server.py` — stdio MCP server exposing `transcribe_audio`, `describe_image`, `converse_text`, `health_check` tools; `Makefile` target `make aes-mcp-server`; `pyproject.toml` console script `voicevision-mcp`
 - **ONNX Runtime vision backend** (T044/B6): `src/voicevision/backends/onnx_vision.py`
   adds `OnnxVisionBackend` for ONNX Runtime vision inference, sharing the ONNX
   Runtime dependency with Piper TTS. `PipelineConfig.vision_backend` selects

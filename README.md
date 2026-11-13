@@ -343,8 +343,93 @@ Ready-to-use clients live in [`integrations/`](integrations/):
 
 Each directory has its own README with installation and usage instructions.
 
+## Python library (voicevision pipeline)
+
+`voicevision` is a reusable Python library — a "lego brick" — for offline
+multimodal AI on the edge. It is a library, not an application: the caller owns
+context, models, and audio devices.
+
+```python
+from voicevision.pipeline import VoicePipeline, PipelineConfig
+
+config = PipelineConfig(
+    stt_model="/models/whisper-base.bin",
+    llm_model="/models/Qwen3-1.7B-Q8_0.gguf",
+    tts_model="/models/voice.onnx",
+    stt_language="pt",
+)
+
+with VoicePipeline(config) as pipeline:
+    result = pipeline.process(audio_bytes)
+    print(result)  # WAV bytes of synthesized speech
+```
+
+### Streaming LLM → TTS sentence-by-sentence
+
+```python
+from voicevision.pipeline import PipelineConfig, VoicePipeline
+
+config = PipelineConfig(
+    stt_model="/models/whisper-base.bin",
+    llm_model="/models/Qwen3-1.7B-Q8_0.gguf",
+    tts_model="/models/voice.onnx",
+    streaming_enabled=True,
+)
+
+with VoicePipeline(config) as pipeline:
+    for speech_chunk in pipeline.process_stream(audio_chunks):
+        # speech_chunk is WAV bytes; play as they arrive
+        play_audio(speech_chunk)
+```
+
+### Emotion detection
+
+```python
+config = PipelineConfig(
+    stt_model="/models/whisper-base.bin",
+    emotion_enabled=True,
+)
+
+pipeline = VoicePipeline(config)
+emotion = pipeline.detect_emotion("I am so happy today!")
+print(emotion)  # EmotionResult(label="positive", score=0.85)
+```
+
+### Speaker identification
+
+```python
+config = PipelineConfig(
+    stt_model="/models/whisper-base.bin",
+    speaker_enabled=True,
+)
+
+pipeline = VoicePipeline(config)
+speaker = pipeline.detect_speaker(audio_bytes, sample_rate=16000)
+print(speaker)  # "Speaker 1"
+```
+
+### Conversation memory
+
+`VoicePipeline.process()` automatically stores `(transcript, response)` pairs
+in conversation history. Configure history persistence:
+
+```python
+config = PipelineConfig(
+    stt_model="/models/whisper-base.bin",
+    llm_model="/models/Qwen3-1.7B-Q8_0.gguf",
+    conversation_path="~/.voicevision/conversation.jsonl",
+    conversation_ttl_days=30,
+    max_history_size=100,
+)
+```
+
+---
 
 ## MCP Server (stdio)
+
+`voicevision-mcp` expõe as capacidades do voicevision como ferramentas MCP (Model Context
+Protocol), permitindo que agentes de IA usem o voicevision como ferramenta
+através de JSON-RPC over stdio:
 
 `voicevision-mcp` expõe as capacidades do voicevision como ferramentas MCP (Model Context
 Protocol), permitindo que agentes de IA usem o voicevision como ferramenta
