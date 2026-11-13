@@ -469,6 +469,25 @@ make doctor            # environment status
 make preflight         # why is this not working right now
 ```
 
+### Benchmarking
+
+Measure performance across backends:
+
+```bash
+# Run all benchmarks (voice-loop models)
+make benchmark MODELS=voice-loop
+
+# Run specific backend groups
+make benchmark MODELS=stt
+make benchmark MODELS=llm
+make benchmark MODELS=tts
+
+# Output results
+make benchmark MODELS=voice-loop --output benchmark.json --output-csv benchmark.csv
+```
+
+Measures TTFT (Time To First Token), RTF (Real Time Factor), and RSS (memory).
+
 ---
 
 # 🤝 Contributing
@@ -496,7 +515,7 @@ MIT. See `LICENSE`.
 
 | Version | Date | Changes |
 |---------|------|---------|
-| Unreleased | 2026-11-09 | Piper TTS fix, custom hotwords, mute TTS, multiple wake words, auto language detection, emotion detection, speaker ID, aes-conflict skill, aes-preflight, aes-epistemics |
+| Unreleased | 2026-11-13 | Piper TTS fix, custom hotwords, mute TTS, multiple wake words, auto language detection, emotion detection, speaker ID, sentence-by-sentence streaming LLM→TTS, conversation memory persistence, model download helper (make download-models), benchmark suite (make benchmark), aes-conflict skill, aes-preflight, aes-epistemics |
 | 0.2.2 | 2026-11-09 | Vision backends (OpenCV + Playwright), MoondreamBackend, describe_and_answer(), conversation memory, streaming LLM → TTS |
 | 0.2.1 | 2026-11-07 | Makefile with voicevision-specific targets; docs fixes |
 | 0.2.0 | 2026-11-07 | Vision backends (OpenCV + Playwright), MoondreamBackend, describe_and_answer(), conversation memory, streaming LLM → TTS |

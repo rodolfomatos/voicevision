@@ -8,7 +8,7 @@
         format-ruff \
         docs-check code-check test-check lint-check \
         verify-implementation \
-        install-precommit install-voice-input download-models \
+        install-precommit install-voice-input download-models benchmark \
         aes-plan aes-build aes-verify aes-review aes-learn \
         aes-wake aes-sleep aes-preflight aes-conflict
 
@@ -42,7 +42,7 @@ install-voice-input:
 # Allow passing model groups as arguments to make download-models
 # Usage: make download-models MODELS=stt or make download-models MODELS="stt llm"
 download-models:
-	@python3 "$(CURDIR)/scripts/download-models.py" $(MODELS)
+	@python3 "$(CURDIR)/scripts/download_models.py" $(MODELS)
 
 # --- Run ---
 run:
@@ -95,6 +95,10 @@ aes-preflight:
 # AES Conflict gate
 aes-conflict:
 	@python3 ~/.config/opencode/skills/aes-conflict/scripts/aes-conflict-check.py
+
+# Benchmark gate
+benchmark:
+	@python3 "$(CURDIR)/scripts/benchmark.py" $(MODELS)
 
 # AES-Epistemics gates (auto-added by aes-epistemics-wire)
 gmif-check:
@@ -196,6 +200,9 @@ help:
 	@echo "  Quality Gates:"
 	@echo "    make check              Full AES quality gate (REQUIRED before commit)"
 	@echo "    make verify-implementation  Verify acceptance criteria"
+	@echo ""
+	@echo "  Benchmarking:"
+	@echo "    make benchmark MODELS=voice-loop    Run benchmarks (MODELS=stt|llm|tts|vision|voice-loop|full)"
 	@echo ""
 	@echo "  AES Project Mode:"
 	@echo "    make aes-wake           Load context (start of session)"
