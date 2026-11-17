@@ -8,6 +8,7 @@ Version: 2.0.0 (M1 Core Abstraction)
 
 from __future__ import annotations
 
+import builtins
 import contextlib
 import threading
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -94,6 +95,8 @@ class ProviderRegistry:
         """Get the singleton registry instance."""
         if cls._instance is None:
             cls()
+        # cls._instance is guaranteed to be set after cls() call
+        assert cls._instance is not None
         return cls._instance
 
     @classmethod
@@ -223,14 +226,14 @@ class ProviderRegistry:
 
     # -- Discovery -----------------------------------------------------------
 
-    def list(self, modality: ModalityName) -> list[str]:
+    def list(self, modality: ModalityName) -> builtins.list[str]:
         """List registered provider names for modality."""
         with self._init_lock:
             if modality not in self._providers:
                 return []
             return list(self._providers[modality].keys())
 
-    def list_all(self) -> dict[ModalityName, list[str]]:
+    def list_all(self) -> dict[ModalityName, builtins.list[str]]:
         """List all registered providers by modality."""
         with self._init_lock:
             return {mod: list(entries.keys()) for mod, entries in self._providers.items()}
@@ -314,7 +317,7 @@ class ProviderRegistry:
             registry.register_class(
                 "stt",
                 "whisper-cpp",
-                WhisperCppBackend,
+                WhisperCppBackend,  # type: ignore[arg-type]
                 default=True,
                 model=config.stt_model,
                 language=config.stt_language,
@@ -325,7 +328,7 @@ class ProviderRegistry:
             registry.register_class(
                 "llm",
                 "llama-cpp",
-                LlamaCppBackend,
+                LlamaCppBackend,  # type: ignore[arg-type]
                 default=True,
                 model=config.llm_model,
                 host=config.llm_host,
@@ -340,7 +343,7 @@ class ProviderRegistry:
             registry.register_class(
                 "tts",
                 "piper",
-                PiperBackend,
+                PiperBackend,  # type: ignore[arg-type]
                 default=True,
                 model=config.tts_model,
                 voice=config.tts_voice,
@@ -351,7 +354,7 @@ class ProviderRegistry:
         registry.register_class(
             "vad",
             "webrtcvad",
-            WebrtcVadBackend,
+            WebrtcVadBackend,  # type: ignore[arg-type]
             default=True,
             aggressiveness=config.vad_aggressiveness,
             sample_rate=config.vad_sample_rate,
@@ -365,7 +368,7 @@ class ProviderRegistry:
                 registry.register_class(
                     "vision",
                     "onnx",
-                    OnnxVisionBackend,
+                    OnnxVisionBackend,  # type: ignore[arg-type]
                     default=True,
                     model=config.vision_model,
                 )
@@ -373,7 +376,7 @@ class ProviderRegistry:
                 registry.register_class(
                     "vision",
                     "llama-cpp",
-                    MoondreamBackend,
+                    MoondreamBackend,  # type: ignore[arg-type]
                     default=True,
                     model=config.vision_model,
                     host=config.vision_host,
@@ -407,7 +410,7 @@ class ProviderRegistry:
         with self._init_lock:
             return modality in self._providers and name in self._providers[modality]
 
-    def validate_config(self, config: PipelineConfig) -> list[str]:
+    def validate_config(self, config: PipelineConfig) -> builtins.list[str]:
         """Validate config against registered providers.
 
         Returns list of warnings (not errors — providers may register later).

@@ -9,9 +9,12 @@ Implements VADProvider protocol (M1).
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle
+
+if TYPE_CHECKING:
+    import webrtcvad
 
 
 class WebrtcVadBackend:
@@ -133,7 +136,7 @@ class WebrtcVadBackend:
     def _segment_audio(
         self,
         audio: bytes,
-        vad: object,  # webrtcvad.Vad (avoid import at top level)
+        vad: webrtcvad.Vad,  # avoid import at top level
         frame_count: int,
         silence_frames: int,
         max_frames: int,

@@ -250,14 +250,14 @@ class LlamaCppBackend(ResidentBackend):
 
     def _process_stream_response(
         self,
-        response: object,  # urllib.response.addinfourl (avoid import at top level)
+        response: urllib.response.addinfourl,  # avoid import at top level
         token: CancellationToken | None,
     ) -> Generator[LLMChunk, None, None]:
         """Process the streaming response from llama-server."""
-        for line in response:
+        for line_bytes in response:
             if token is not None:
                 token.throw_if_cancelled()
-            line = line.decode("utf-8", errors="replace").strip()
+            line = line_bytes.decode("utf-8", errors="replace").strip()
             if not line or not line.startswith("data: "):
                 continue
             data_str = line[6:]  # Remove "data: " prefix

@@ -309,9 +309,9 @@ class PipelineConfig:
             ),
         ]
 
-        for condition, message, _field_name, value in checks:
+        for condition, message, field_name, value in checks:
             if not condition:
-                raise ConfigurationError(message, field=field, value=value)
+                raise ConfigurationError(message, field=field_name, value=value)
 
     def _validate_vision_config(self) -> None:
         from voicevision.errors import ConfigurationError

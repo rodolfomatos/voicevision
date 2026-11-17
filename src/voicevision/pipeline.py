@@ -23,6 +23,7 @@ from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
 from voicevision.core.protocols import EmotionResult
+from voicevision.text import extract_sentences
 
 
 @dataclass
@@ -522,80 +523,8 @@ class VoicePipeline:
         return text.strip()
 
     def _extract_sentences(self, text: str) -> list[str]:
-        """Extract complete sentences from text using proper boundary detection.
-
-        Handles common edge cases:
-        - Abbreviations (Dr., Sr., etc.) - not sentence endings
-        - Ellipsis (...) - not sentence endings
-        - Quotes and parentheses - handle nesting
-        - Multiple punctuation (!?, ...)
-
-        Args:
-            text: Input text to split into sentences
-
-        Returns:
-            List of complete sentences (stripped, no trailing space)
-        """
-        if not text.strip():
-            return []
-
-        sentences = []
-        current = []
-        paren_depth = 0
-        in_quotes = False
-        quote_char = None
-
-        for i, ch in enumerate(text):
-            current.append(ch)
-
-            # Track parentheses
-            if ch == '(':
-                paren_depth += 1
-            elif ch == ')':
-                paren_depth = max(0, paren_depth - 1)
-
-            # Track quotes
-            if ch in ('"', "'", '«', '»', '„', '“', '”'):
-                if not in_quotes:
-                    in_quotes = True
-                    quote_char = ch
-                elif ch == quote_char:
-                    in_quotes = False
-                    quote_char = None
-
-            # Check for sentence endings
-            if ch in '.!?':
-                # Check for ellipsis
-                if i + 2 < len(text) and text[i:i+3] == '...':
-                    continue
-
-                # Check for common abbreviations (simple heuristic)
-                # Look back for common patterns like "Dr.", "Sr.", "etc."
-                if ch == '.':
-                    # Look back for abbreviation pattern
-                    word_end = i
-                    word_start = word_end
-                    while word_start > 0 and text[word_start - 1].isalpha():
-                        word_start -= 1
-                    word = text[word_start:word_end].lower()
-                    if word in ('dr', 'sr', 'sra', 'srta', 'prof', 'profª', 'profº',
-                                'etc', 'ex', 'p', 'pp', 'cap', 'art', 'inc',
-                                'ltd', 'sa', 'eua', 'uk', 'br', 'sp', 'rj'):
-                        continue  # Not a sentence end
-
-                # Only split if not inside quotes or parentheses
-                if paren_depth == 0 and not in_quotes:
-                    sentence = ''.join(current).strip()
-                    if sentence:
-                        sentences.append(sentence)
-                    current = []
-
-        # Handle remaining text (incomplete sentence)
-        remaining = ''.join(current).strip()
-        if remaining:
-            sentences.append(remaining)
-
-        return sentences
+        """Extract complete sentences using the shared text module."""
+        return extract_sentences(text)
 
     def close(self) -> None:
         """Release all backend resources and save conversation context."""

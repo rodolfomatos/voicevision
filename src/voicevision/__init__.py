@@ -64,6 +64,13 @@ from voicevision.errors import (
     VoiceVisionError,
 )
 from voicevision.pipeline import PipelineConfig, VoicePipeline
+from voicevision.text import (
+    WordTiming,
+    ends_sentence,
+    extract_sentences,
+    segments_from_words,
+    spread_words,
+)
 
 if TYPE_CHECKING:
     from voicevision.core.config import VoiceVisionConfig
@@ -96,6 +103,11 @@ __all__ = [
     "TTSChunk",
     "Completion",
     "EmotionResult",
+    "WordTiming",
+    "ends_sentence",
+    "spread_words",
+    "segments_from_words",
+    "extract_sentences",
     "VoiceVisionError",
     "ConfigurationError",
     "ProviderError",
