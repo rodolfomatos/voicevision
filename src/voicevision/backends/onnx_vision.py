@@ -9,13 +9,16 @@ supply the ONNX model file and set ``VOICEVISION_VISION_MODEL``.
 
 All heavy dependencies (onnxruntime, Pillow, numpy) are probed lazily so
 ``import voicevision.backends.onnx_vision`` stays cheap.
+
+Implements VisionProvider protocol (M1).
 """
 
 from __future__ import annotations
 
 from typing import Any, Final
 
-from voicevision.errors import BackendExecutionError
+from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle
+from voicevision.errors import BackendExecutionError, ProviderRuntimeError
 
 #: Maximum image size in pixels (larger images are downscaled before inference).
 MAX_IMAGE_SIZE: Final = 512
@@ -23,6 +26,8 @@ MAX_IMAGE_SIZE: Final = 512
 
 class OnnxVisionBackend:
     """Describe and answer questions about images via ONNX Runtime.
+
+    Implements VisionProvider protocol.
 
     Loads an ONNX vision-language model once and keeps it resident in memory,
     avoiding the subprocess spawn overhead of :class:`MoondreamBackend` on every
@@ -67,6 +72,9 @@ class OnnxVisionBackend:
         except ImportError:
             return False
 
+    # install_hint is a class attribute (line 45). The protocol expects a classmethod,
+    # but @runtime_checkable only validates instance methods. Class attribute works.
+
     def _ensure_session(self) -> Any:
         """Lazy-load the ONNX session on first use."""
         if self._session is None:
@@ -78,31 +86,45 @@ class OnnxVisionBackend:
                     providers=self._providers,
                 )
             except Exception as exc:  # noqa: BLE001 - surface all backend errors
-                raise BackendExecutionError(
+                raise ProviderRuntimeError(
                     "onnxvision",
+                    "vision",
                     f"could not load ONNX model {self._model}: {exc}",
                     command=f"onnxruntime.InferenceSession({self._model})",
                 ) from exc
         return self._session
 
-    def describe(self, image_data: bytes, prompt: str | None = None, **kwargs: Any) -> str:
+    # -- VisionProvider protocol -----------------------------------------------
+
+    def describe(
+        self,
+        image: bytes,
+        *,
+        prompt: str | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Describe or analyze an image.
 
         Args:
-            image_data: Raw image bytes (JPEG/PNG).
+            image: Raw image bytes (JPEG/PNG).
             prompt: Optional prompt to guide description (e.g. "What is in
                 this image?").
+            token: Optional cancellation token.
             **kwargs: Backend-specific parameters (ignored).
 
         Returns:
             Text description/analysis of the image.
 
         Raises:
-            BackendExecutionError: if ONNX Runtime or Pillow is not available,
+            ProviderRuntimeError: if ONNX Runtime or Pillow is not available,
                 or if inference fails.
         """
+        if token is not None:
+            token.throw_if_cancelled()
+
         del kwargs  # unused
-        if not image_data:
+        if not image:
             raise BackendExecutionError(
                 "onnxvision",
                 "no image data provided",
@@ -124,9 +146,9 @@ class OnnxVisionBackend:
 
         try:
             # Preprocess image: load, resize, normalize
-            image = Image.open(io.BytesIO(image_data)).convert("RGB")
-            image = image.resize((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE))
-            arr = np.array(image, dtype=np.float32) / 255.0
+            img = Image.open(io.BytesIO(image)).convert("RGB")
+            img = img.resize((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE))
+            arr = np.array(img, dtype=np.float32) / 255.0
             arr = np.transpose(arr, (2, 0, 1))  # HWC -> CHW
             arr = np.expand_dims(arr, axis=0)  # Add batch dimension
 
@@ -164,12 +186,84 @@ class OnnxVisionBackend:
         except BackendExecutionError:
             raise
         except Exception as exc:  # noqa: BLE001 - surface all backend errors
-            raise BackendExecutionError(
+            raise ProviderRuntimeError(
                 "onnxvision",
+                "vision",
                 f"inference failed: {exc}",
                 command=f"onnxruntime.InferenceSession.run({self._model})",
             ) from exc
 
+    def analyze(
+        self,
+        image: bytes,
+        *,
+        task: str = "describe",
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Analyze image with structured output.
+
+        Args:
+            image: Raw image bytes.
+            task: Analysis task ('describe', 'ocr', 'detect', 'classify').
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
+
+        Returns:
+            Structured result dict.
+        """
+        if token is not None:
+            token.throw_if_cancelled()
+
+        # Delegate to describe with task-specific prompt
+        prompts = {
+            "describe": "Describe this image in detail.",
+            "ocr": "Extract all text from this image.",
+            "detect": "List all objects detected in this image with bounding boxes.",
+            "classify": "Classify the main subject of this image.",
+        }
+        prompt = prompts.get(task, prompts["describe"])
+        description = self.describe(image, prompt=prompt, token=token)
+        return {"task": task, "description": description}
+
     def close(self) -> None:
         """Release the ONNX session."""
         self._session = None
+
+    # -- Provider protocol -----------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        return "onnxvision"
+
+    @property
+    def modality(self) -> str:
+        return "vision"
+
+    def capabilities(self) -> ProviderCapabilities:
+        from voicevision.core.protocols import ProviderCapabilities
+        return ProviderCapabilities(
+            streaming=False,
+            languages=frozenset(),
+            models=frozenset({"moondream2", "llava", "qwen-vl"}),
+            max_concurrent=4,
+            supports_cancellation=True,
+        )
+
+    def lifecycle(self) -> ProviderLifecycle:
+        return self
+
+    def initialize(self) -> None:
+        self._ensure_session()
+
+    def shutdown(self) -> None:
+        self.close()
+
+    def health_check(self) -> bool:
+        return self._session is not None and self.available()
+
+
+# Forward reference for type hints
+class CancellationToken:
+    """Forward reference."""
+    def throw_if_cancelled(self) -> None: ...

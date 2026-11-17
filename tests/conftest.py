@@ -8,15 +8,15 @@ from typing import Any
 
 import pytest
 
-from voicevision.core.registry import BackendRegistry
+from voicevision.core.registry import ProviderRegistry
 
 
 @pytest.fixture(autouse=True)
 def clean_registry() -> Generator[None, None, None]:
     """Reset registry before each test."""
-    BackendRegistry.clear()
+    ProviderRegistry.reset_singleton()
     yield
-    BackendRegistry.clear()
+    ProviderRegistry.reset_singleton()
 
 
 @pytest.fixture
@@ -27,6 +27,10 @@ def dummy_config() -> dict[str, Any]:
         "stt_backend": "dummy",
         "tts_backend": "dummy",
         "vision_backend": "dummy",
+        "vad_backend": "dummy",
+        "emotion_backend": "dummy",
+        "speakerid_backend": "dummy",
+        "wakeword_backend": "dummy",
         "camera_backend": "dummy",
     }
 
@@ -39,6 +43,10 @@ def mock_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
         "VOICEVISION_STT_BACKEND": "dummy",
         "VOICEVISION_TTS_BACKEND": "dummy",
         "VOICEVISION_VISION_BACKEND": "dummy",
+        "VOICEVISION_VAD_BACKEND": "dummy",
+        "VOICEVISION_EMOTION_BACKEND": "dummy",
+        "VOICEVISION_SPEAKERID_BACKEND": "dummy",
+        "VOICEVISION_WAKEWORD_BACKEND": "dummy",
         "VOICEVISION_CAMERA_BACKEND": "dummy",
     }
     for k, v in env.items():
@@ -52,3 +60,9 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ.keys()):
         if key.startswith("VOICEVISION_"):
             monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture
+def test_registry() -> ProviderRegistry:
+    """Provide a clean registry for testing."""
+    return ProviderRegistry.for_testing()

@@ -1,24 +1,21 @@
 """Emotion detection on transcript text.
 
 Simple rule-based implementation with no external dependencies.
+
+Implements EmotionProvider protocol (M1).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import ClassVar
 
-
-@dataclass
-class EmotionResult:
-    """Result of emotion detection."""
-
-    label: str
-    score: float
+from voicevision.core.protocols import EmotionResult, ProviderCapabilities, ProviderLifecycle
 
 
 class SimpleEmotionBackend:
     """Simple rule-based emotion detection.
+
+    Implements EmotionProvider protocol.
 
     Uses keyword matching to classify text as positive, negative, or neutral.
     No external model dependencies.
@@ -138,15 +135,30 @@ class SimpleEmotionBackend:
         """Always available - no external dependencies."""
         return True
 
-    def detect(self, text: str) -> EmotionResult:
+    @classmethod
+    def install_hint(cls) -> str:
+        return "Built-in: no installation required"
+
+    # -- EmotionProvider protocol ----------------------------------------------
+
+    def detect(
+        self,
+        text: str,
+        *,
+        token: CancellationToken | None = None,
+    ) -> EmotionResult:
         """Detect emotion from text.
 
         Args:
             text: Input text to analyze.
+            token: Optional cancellation token.
 
         Returns:
             EmotionResult with label (positive/negative/neutral) and confidence score.
         """
+        if token is not None:
+            token.throw_if_cancelled()
+
         if not text or not text.strip():
             return EmotionResult(label="neutral", score=0.5)
 
@@ -172,6 +184,38 @@ class SimpleEmotionBackend:
             return EmotionResult(label="negative", score=confidence)
         return EmotionResult(label="neutral", score=0.5)
 
+    # -- Provider protocol -----------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        return "simple"
+
+    @property
+    def modality(self) -> str:
+        return "emotion"
+
+    def capabilities(self) -> ProviderCapabilities:
+        from voicevision.core.protocols import ProviderCapabilities
+        return ProviderCapabilities(
+            streaming=False,
+            languages=frozenset({"en", "pt"}),  # English and Portuguese keywords
+            models=frozenset(),
+            max_concurrent=100,
+            supports_cancellation=True,
+        )
+
+    def lifecycle(self) -> ProviderLifecycle:
+        return self
+
+    def initialize(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        pass
+
+    def health_check(self) -> bool:
+        return True
+
 
 # Default backend instance
 _default_backend: SimpleEmotionBackend | None = None
@@ -188,3 +232,9 @@ def get_emotion_backend() -> SimpleEmotionBackend:
 def detect_emotion(text: str) -> EmotionResult:
     """Convenience function to detect emotion using the default backend."""
     return get_emotion_backend().detect(text)
+
+
+# Forward reference for type hints
+class CancellationToken:
+    """Forward reference."""
+    def throw_if_cancelled(self) -> None: ...

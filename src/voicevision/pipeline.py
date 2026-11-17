@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
-from voicevision.backends.emotion import EmotionResult, SimpleEmotionBackend
+from voicevision.backends.emotion import SimpleEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
 from voicevision.backends.onnx_vision import OnnxVisionBackend
 from voicevision.backends.piper import PiperBackend
@@ -22,6 +22,7 @@ from voicevision.backends.speaker import SimpleSpeakerBackend
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
+from voicevision.core.protocols import EmotionResult
 
 
 @dataclass
@@ -326,7 +327,7 @@ class VoicePipeline:
         """
         if not self.config.speaker_enabled:
             return None
-        return SimpleSpeakerBackend().identify(audio, sample_rate)
+        return SimpleSpeakerBackend().identify(audio, sample_rate=sample_rate)
 
     def process_stream(self, audio_chunks: Iterator[bytes]) -> Iterator[bytes]:
         """Process a stream of audio chunks, yielding speech as it's ready.
@@ -380,10 +381,11 @@ class VoicePipeline:
         full_response = ""
         synthesized_until = 0  # Track how much of full_response has been synthesized
 
-        for chunk in self.llm.complete_stream(prompt):
-            full_response += chunk
-            if not chunk.strip():
+        for llm_chunk in self.llm.generate_stream(prompt):
+            if not llm_chunk.content.strip():
                 continue
+
+            full_response += llm_chunk.content
 
             # Apply thinking filter if enabled
             if self.config.enable_thinking_filter:

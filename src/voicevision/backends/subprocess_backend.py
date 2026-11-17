@@ -28,6 +28,8 @@ while the parent waits on stdout. Rewriting `_invoke` as a manual
 `stdin.write` / `stdout.read` loop reintroduces that deadlock. There is a
 regression test for it (test_stderr_flood_does_not_deadlock) — read it before
 touching this code.
+
+Implements ProviderLifecycle for one-shot backends (M1).
 """
 
 from __future__ import annotations
@@ -37,7 +39,10 @@ import subprocess
 import threading
 from typing import ClassVar
 
-from voicevision.errors import BackendExecutionError, BackendNotAvailableError
+from voicevision.errors import (
+    BackendExecutionError,
+    BackendNotAvailableError,
+)
 
 #: Grace period between SIGTERM and SIGKILL.
 _KILL_GRACE_SECONDS = 2.0
@@ -52,6 +57,8 @@ class SubprocessBackend:
     Subclasses declare the executable and parse whatever comes back; this class
     guarantees that the call completes within a deadline and that failures are
     legible.
+
+    Implements ProviderLifecycle for one-shot backends.
     """
 
     #: Executable name, resolved on PATH. Subclasses must override.
@@ -106,9 +113,12 @@ class SubprocessBackend:
         """Whether this backend's executable can be found.
 
         Called before any work so the operator gets `install_hint` instead of a
-        FileNotFoundError traceback.
+        `FileNotFoundError` traceback.
         """
         return bool(cls.executable) and shutil.which(cls.executable) is not None
+
+    # install_hint is a class attribute (line 68). The protocol expects a classmethod,
+    # but @runtime_checkable only validates instance methods. Class attribute works.
 
     def describe(self) -> str:
         """One-line summary for diagnostics and `make doctor`."""
@@ -129,7 +139,10 @@ class SubprocessBackend:
                 shell=False,
             )
         except FileNotFoundError as exc:
-            raise BackendNotAvailableError(self._name, self.install_hint) from exc
+            raise BackendNotAvailableError(
+                self._name,
+                self.install_hint,
+            ) from exc
         except OSError as exc:
             raise BackendExecutionError(
                 self._name,
@@ -227,6 +240,20 @@ class SubprocessBackend:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=_KILL_GRACE_SECONDS)
+
+    # -- ProviderLifecycle -------------------------------------------------
+
+    def initialize(self) -> None:
+        """No-op: one-shot backend has no persistent state to initialize."""
+        pass
+
+    def shutdown(self) -> None:
+        """No-op: one-shot backend has no persistent child to stop."""
+        return
+
+    def health_check(self) -> bool:
+        """Check if backend executable is available."""
+        return self.available()
 
     def close(self) -> None:
         """No long-lived child to stop. Present for interface symmetry and to

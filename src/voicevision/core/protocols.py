@@ -1,156 +1,609 @@
-"""Core protocol definitions for voicevision backends.
+"""Core protocol definitions for voicevision providers.
 
-All backends implement these protocols via structural subtyping (typing.Protocol).
+All providers implement these protocols via structural subtyping (typing.Protocol).
 No inheritance required — any class with matching methods qualifies.
+
+Version: 2.0.0 (M1 Core Abstraction)
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Generator
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+# =============================================================================
+# Capability & Lifecycle Metadata
+# =============================================================================
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """Capabilities declared by a provider.
+
+    Used by the registry and model router for selection.
+    """
+    streaming: bool = False
+    languages: frozenset[str] = frozenset()
+    models: frozenset[str] = frozenset()
+    max_concurrent: int = 1
+    supports_cancellation: bool = False
+
 
 @runtime_checkable
-class LLMBackend(Protocol):
-    """Language model backend for text generation."""
+class ProviderLifecycle(Protocol):
+    """Provider lifecycle management."""
 
     __slots__ = ()
 
-    def generate(self, prompt: str, **kwargs: Any) -> str:
-        """Generate text completion for the given prompt.
+    def initialize(self) -> None:
+        """Initialize the provider (load model, start daemon, etc.)."""
+        ...
+
+    def shutdown(self) -> None:
+        """Shutdown the provider (stop daemon, release resources)."""
+        ...
+
+    def health_check(self) -> bool:
+        """Quick health check. Returns True if healthy."""
+        ...
+
+
+@runtime_checkable
+class Provider(Protocol):
+    """Base protocol for all providers."""
+
+    __slots__ = ()
+
+    @property
+    def name(self) -> str:
+        """Unique provider name within modality."""
+        ...
+
+    @property
+    def modality(self) -> str:
+        """Modality: stt, llm, tts, vad, vision, wakeword, speakerid, emotion."""
+        ...
+
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare provider capabilities."""
+        ...
+
+    def lifecycle(self) -> ProviderLifecycle:
+        """Return lifecycle manager."""
+        ...
+
+    @classmethod
+    def available(cls) -> bool:
+        """Fast check if provider can run (executable exists, deps installed)."""
+        ...
+
+    @classmethod
+    def install_hint(cls) -> str:
+        """User-actionable installation instruction."""
+        ...
+
+
+# =============================================================================
+# Chunk Types for Streaming
+# =============================================================================
+
+@dataclass(frozen=True)
+class STTChunk:
+    """Streaming STT chunk."""
+    text: str
+    is_final: bool = False
+    language: str | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class LLMChunk:
+    """Streaming LLM chunk."""
+    content: str
+    is_final: bool = False
+    thinking: str = ""
+
+
+@dataclass(frozen=True)
+class TTSChunk:
+    """Streaming TTS chunk."""
+    audio: bytes
+    is_final: bool = False
+    sample_rate: int = 16000
+
+
+# =============================================================================
+# Provider Protocols
+# =============================================================================
+
+@runtime_checkable
+class STTProvider(Provider, Protocol):
+    """Speech-to-text provider."""
+
+    __slots__ = ()
+
+    @property
+    def modality(self) -> str:
+        return "stt"
+
+    def transcribe(
+        self,
+        audio: bytes,
+        *,
+        language: str | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """Transcribe complete audio to text.
 
         Args:
-            prompt: Input text prompt.
-            **kwargs: Backend-specific parameters (temperature, max_tokens, etc.).
+            audio: PCM16 mono audio at 16kHz (or provider-specific format).
+            language: Language code (e.g., 'en', 'pt') or 'auto' for detection.
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
 
         Returns:
-            Generated text completion.
+            Transcribed text. Empty string if no speech detected.
+
+        Raises:
+            ProviderUnavailableError: If provider not installed/configured.
+            ProviderTimeoutError: If deadline exceeded.
+            ProviderRuntimeError: If transcription fails.
         """
         ...
 
-    def generate_stream(self, prompt: str, **kwargs: Any) -> Iterator[str]:
-        """Stream text generation (optional).
+    def transcribe_stream(
+        self,
+        audio_chunks: Generator[bytes, None, None] | AsyncGenerator[bytes, None],
+        *,
+        language: str | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> Generator[STTChunk, None, None] | AsyncGenerator[STTChunk, None]:
+        """Stream transcription from audio chunks.
 
         Args:
-            prompt: Input text prompt.
-            **kwargs: Backend-specific parameters.
+            audio_chunks: Generator yielding audio chunks.
+            language: Language code or 'auto'.
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
 
         Yields:
-            Text chunks as they are generated.
+            STTChunk with partial/final transcripts.
         """
         ...
 
-
-@runtime_checkable
-class STTBackend(Protocol):
-    """Speech-to-text backend for audio transcription."""
-
-    __slots__ = ()
-
-    def transcribe(self, audio_data: bytes, **kwargs: Any) -> str:
-        """Transcribe audio to text.
+    def detect_language(
+        self,
+        audio: bytes,
+        *,
+        token: CancellationToken | None = None,
+    ) -> str:
+        """Detect language from audio.
 
         Args:
-            audio_data: Raw audio bytes (WAV, MP3, etc. — backend-dependent).
-            **kwargs: Backend-specific parameters (language, etc.).
+            audio: PCM16 mono audio.
+            token: Optional cancellation token.
 
         Returns:
-            Transcribed text.
-        """
-        ...
+            ISO 639-1 language code (e.g., 'en', 'pt').
 
-    def transcribe_stream(self, audio_chunk: bytes, **kwargs: Any) -> Iterator[str]:
-        """Stream transcription (optional).
-
-        Args:
-            audio_chunk: Audio chunk bytes.
-            **kwargs: Backend-specific parameters.
-
-        Yields:
-            Partial transcriptions.
+        Raises:
+            ProviderRuntimeError: If detection fails.
         """
         ...
 
 
 @runtime_checkable
-class TTSBackend(Protocol):
-    """Text-to-speech backend for speech synthesis."""
+class LLMProvider(Provider, Protocol):
+    """Language model provider."""
 
     __slots__ = ()
 
-    def synthesize(self, text: str, **kwargs: Any) -> bytes:
-        """Synthesize speech from text.
+    @property
+    def modality(self) -> str:
+        return "llm"
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        stop: list[str] | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """Generate completion (non-streaming).
 
         Args:
-            text: Input text to synthesize.
-            **kwargs: Backend-specific parameters (voice, speed, etc.).
+            prompt: Input prompt.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+            stop: Stop sequences.
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
 
         Returns:
-            Audio bytes (WAV format recommended).
+            Generated text (reasoning traces already filtered if applicable).
         """
         ...
 
-    def synthesize_stream(self, text: str, **kwargs: Any) -> Iterator[bytes]:
-        """Stream synthesis (optional).
+    def generate_stream(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        stop: list[str] | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> Generator[LLMChunk, None, None] | AsyncGenerator[LLMChunk, None]:
+        """Stream completion chunks.
 
         Args:
-            text: Input text.
-            **kwargs: Backend-specific parameters.
+            prompt: Input prompt.
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+            stop: Stop sequences.
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
 
         Yields:
-            Audio chunks as they are generated.
+            LLMChunk with content chunks.
+        """
+        ...
+
+    def complete(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        stop: list[str] | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> Completion:
+        """Generate completion with separate reasoning trace.
+
+        Returns:
+            Completion object with content and thinking separated.
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class Completion:
+    """LLM completion with separated reasoning."""
+    content: str
+    thinking: str = ""
+    raw: dict[str, Any] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.raw is None:
+            object.__setattr__(self, "raw", {})
+
+    @property
+    def has_thinking(self) -> bool:
+        return bool(self.thinking.strip())
+
+
+@runtime_checkable
+class TTSProvider(Provider, Protocol):
+    """Text-to-speech provider."""
+
+    __slots__ = ()
+
+    @property
+    def modality(self) -> str:
+        return "tts"
+
+    def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        speed: float = 1.0,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> bytes:
+        """Synthesize speech from text (non-streaming).
+
+        Args:
+            text: Text to synthesize.
+            voice: Voice identifier.
+            speed: Speech speed multiplier.
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
+
+        Returns:
+            Audio bytes (WAV format, 16kHz mono PCM16 recommended).
+        """
+        ...
+
+    def synthesize_stream(
+        self,
+        text_chunks: Generator[str, None, None] | AsyncGenerator[str, None],
+        *,
+        voice: str | None = None,
+        speed: float = 1.0,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> Generator[TTSChunk, None, None] | AsyncGenerator[TTSChunk, None]:
+        """Stream synthesis from text chunks.
+
+        Args:
+            text_chunks: Generator yielding text chunks.
+            voice: Voice identifier.
+            speed: Speech speed multiplier.
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
+
+        Yields:
+            TTSChunk with audio chunks.
         """
         ...
 
 
 @runtime_checkable
-class VisionBackend(Protocol):
-    """Vision backend for image description/analysis."""
+class VADProvider(Provider, Protocol):
+    """Voice activity detection provider."""
 
     __slots__ = ()
 
-    def describe(self, image_data: bytes, prompt: str | None = None, **kwargs: Any) -> str:
+    @property
+    def modality(self) -> str:
+        return "vad"
+
+    def process_frame(
+        self,
+        frame: bytes,
+        *,
+        token: CancellationToken | None = None,
+    ) -> bool:
+        """Process a single audio frame.
+
+        Args:
+            frame: Audio frame (30ms at sample_rate, 16-bit mono).
+            token: Optional cancellation token.
+
+        Returns:
+            True if speech detected in frame.
+        """
+        ...
+
+    def segment(
+        self,
+        audio: bytes,
+        *,
+        token: CancellationToken | None = None,
+    ) -> Generator[tuple[int, int], None, None]:
+        """Segment audio into utterance byte ranges.
+
+        Args:
+            audio: Complete PCM16 audio.
+            token: Optional cancellation token.
+
+        Yields:
+            (start_byte, end_byte) pairs for each utterance.
+        """
+        ...
+
+    @property
+    def frame_bytes(self) -> int:
+        """Frame size in bytes for the configured sample rate."""
+        ...
+
+    @property
+    def sample_rate(self) -> int:
+        """Sample rate in Hz."""
+        ...
+
+
+@runtime_checkable
+class VisionProvider(Provider, Protocol):
+    """Vision/image analysis provider."""
+
+    __slots__ = ()
+
+    @property
+    def modality(self) -> str:
+        return "vision"
+
+    def describe(
+        self,
+        image: bytes,
+        *,
+        prompt: str | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Describe or analyze an image.
 
         Args:
-            image_data: Raw image bytes (JPEG, PNG, etc. — backend-dependent).
+            image: Raw image bytes (JPEG/PNG).
             prompt: Optional prompt to guide description.
-            **kwargs: Backend-specific parameters.
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
 
         Returns:
             Text description/analysis.
         """
         ...
 
+    def analyze(
+        self,
+        image: bytes,
+        *,
+        task: str = "describe",
+        token: CancellationToken | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Analyze image with structured output.
+
+        Args:
+            image: Raw image bytes.
+            task: Analysis task ('describe', 'ocr', 'detect', 'classify').
+            token: Optional cancellation token.
+            **kwargs: Provider-specific parameters.
+
+        Returns:
+            Structured result dict.
+        """
+        ...
+
 
 @runtime_checkable
-class CameraBackend(Protocol):
-    """Camera backend for image capture."""
+class WakeWordProvider(Provider, Protocol):
+    """Wake word detection provider."""
 
     __slots__ = ()
 
-    def capture(self, **kwargs: Any) -> bytes:
-        """Capture a single frame.
+    @property
+    def modality(self) -> str:
+        return "wakeword"
+
+    def process_frame(
+        self,
+        frame: bytes,
+        *,
+        token: CancellationToken | None = None,
+    ) -> str | None:
+        """Process frame for wake word.
 
         Args:
-            **kwargs: Backend-specific parameters (resolution, format, etc.).
+            frame: Audio frame.
+            token: Optional cancellation token.
 
         Returns:
-            Image bytes (JPEG/PNG).
+            Matched wake word if detected, None otherwise.
         """
         ...
 
-    def capture_stream(self, **kwargs: Any) -> Iterator[bytes]:
-        """Stream frames (optional).
+    def check(
+        self,
+        audio: bytes,
+        *,
+        token: CancellationToken | None = None,
+    ) -> str | None:
+        """Check complete audio for wake word.
 
         Args:
-            **kwargs: Backend-specific parameters.
+            audio: Complete audio buffer.
+            token: Optional cancellation token.
 
-        Yields:
-            Image frames as bytes.
+        Returns:
+            Matched wake word if detected, None otherwise.
         """
         ...
 
-    def close(self) -> None:
-        """Release camera resources."""
+    @property
+    def wake_words(self) -> frozenset[str]:
+        """Configured wake words."""
         ...
+
+
+@runtime_checkable
+class SpeakerIDProvider(Provider, Protocol):
+    """Speaker identification provider."""
+
+    __slots__ = ()
+
+    @property
+    def modality(self) -> str:
+        return "speakerid"
+
+    def identify(
+        self,
+        audio: bytes,
+        *,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> str:
+        """Identify speaker from audio.
+
+        Args:
+            audio: PCM16 mono audio.
+            sample_rate: Sample rate in Hz.
+            token: Optional cancellation token.
+
+        Returns:
+            Speaker label (e.g., "Speaker 1").
+        """
+        ...
+
+    def enroll(
+        self,
+        audio: bytes,
+        *,
+        label: str,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> None:
+        """Enroll a new speaker.
+
+        Args:
+            audio: Reference audio for speaker.
+            label: Speaker label.
+            sample_rate: Sample rate in Hz.
+            token: Optional cancellation token.
+        """
+        ...
+
+    def reset(self) -> None:
+        """Reset speaker profiles for new session."""
+        ...
+
+
+@runtime_checkable
+class EmotionProvider(Provider, Protocol):
+    """Emotion detection provider."""
+
+    __slots__ = ()
+
+    @property
+    def modality(self) -> str:
+        return "emotion"
+
+    def detect(
+        self,
+        text: str,
+        *,
+        token: CancellationToken | None = None,
+    ) -> EmotionResult:
+        """Detect emotion from text.
+
+        Args:
+            text: Input text to analyze.
+            token: Optional cancellation token.
+
+        Returns:
+            EmotionResult with label and score.
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class EmotionResult:
+    """Result of emotion detection."""
+    label: str  # positive, negative, neutral, etc.
+    score: float  # 0.0 - 1.0
+
+
+# =============================================================================
+# Type Aliases
+# =============================================================================
+
+ModalityName = str  # stt | llm | tts | vad | vision | wakeword | speakerid | emotion
+
+ProviderType = (
+    STTProvider | LLMProvider | TTSProvider | VADProvider |
+    VisionProvider | WakeWordProvider | SpeakerIDProvider | EmotionProvider
+)
+
+
+# Forward reference for CancellationToken (defined in T074)
+class CancellationToken:
+    """Forward reference - implemented in voicevision.core.cancellation"""
+    pass

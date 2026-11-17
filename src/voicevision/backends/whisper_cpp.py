@@ -4,17 +4,21 @@ whisper.cpp is a one-shot program: it reads a WAV file from stdin, prints a
 transcript, and exits. That matches SubprocessBackend's semantics exactly — see
 that module's docstring for why it spawns per call rather than keeping a child
 warm.
+
+Implements STTProvider protocol (M1).
 """
 
 from __future__ import annotations
 
 import re
 import shutil
+from collections.abc import Generator
 from typing import ClassVar, Final
 
 from voicevision.audio import require_whisper_format
 from voicevision.backends.subprocess_backend import SubprocessBackend
-from voicevision.errors import BackendExecutionError
+from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle, STTChunk
+from voicevision.errors import ProviderRuntimeError
 
 #: whisper.cpp prefixes each segment with `[00:00:00.000 --> 00:00:02.000]`.
 #: `-nt` suppresses these, but forks differ, so strip defensively rather than
@@ -31,6 +35,7 @@ _FILE_WRITTEN = re.compile(r"^\s*.*\.txt\s*$", re.MULTILINE)
 class WhisperCppBackend(SubprocessBackend):
     """Transcribe 16 kHz mono PCM16 WAV using whisper.cpp.
 
+    Implements STTProvider protocol.
     The model path is supplied by the caller; this class never downloads
     anything.
     """
@@ -100,23 +105,40 @@ class WhisperCppBackend(SubprocessBackend):
         candidates = (cls.executable, *cls.alternate_executables)
         return any(shutil.which(c) for c in candidates)
 
-    def transcribe(self, audio: bytes, *, language: str | None = None, **kwargs: object) -> str:
+    # install_hint is a class attribute (line 43). The protocol expects a classmethod,
+    # but @runtime_checkable only validates instance methods. Class attribute works.
+
+    # -- STTProvider protocol --------------------------------------------------
+
+    def transcribe(
+        self,
+        audio: bytes,
+        *,
+        language: str | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: object,
+    ) -> str:
         """Transcribe a WAV file.
 
         Args:
             audio: 16 kHz mono PCM16 WAV bytes.
             language: Language code (e.g., 'en', 'pt') or "auto" for detection.
                 If None, uses the language from constructor.
+            token: Optional cancellation token (checked before spawn).
+            **kwargs: Ignored; per-call overrides belong on constructor.
 
         Returns:
-            The transcript. Empty string when the audio contains no speech —
-                that is a result, not an error.
+            The transcript. Empty string when the audio contains no speech.
 
         Raises:
             AudioFormatError: if the audio is not 16 kHz mono PCM16.
-            BackendNotAvailableError: if whisper.cpp is not installed.
-            BackendExecutionError: if whisper.cpp fails.
+            ProviderUnavailableError: if whisper.cpp is not installed.
+            ProviderRuntimeError: if whisper.cpp fails.
         """
+        # Check cancellation before spawning
+        if token is not None:
+            token.throw_if_cancelled()
+
         # Validate before spawning. A format problem is the caller's bug and
         # naming it precisely is more useful than whatever whisper.cpp makes of
         # it. Never resample here — see voicevision.audio.
@@ -124,7 +146,7 @@ class WhisperCppBackend(SubprocessBackend):
 
         # Auto-detect language if requested
         if language == "auto":
-            language = self.detect_language(audio)
+            language = self.detect_language(audio, token=token)
 
         # If language differs from constructor, rebuild argv
         if language and language != self._language:
@@ -139,6 +161,87 @@ class WhisperCppBackend(SubprocessBackend):
         else:
             raw = self.run(audio).decode("utf-8", errors="replace")
         return self.parse_transcript(raw)
+
+    def transcribe_stream(
+        self,
+        audio_chunks: Generator[bytes, None, None],
+        *,
+        language: str | None = None,
+        token: CancellationToken | None = None,
+        **kwargs: object,
+    ) -> Generator[STTChunk, None, None]:
+        """Stream transcription — not supported by whisper.cpp one-shot.
+
+        whisper.cpp is a one-shot CLI. This method buffers all chunks and
+        returns a single final chunk for compatibility.
+        """
+        # Buffer all chunks
+        audio_buffer = bytearray()
+        for chunk in audio_chunks:
+            if token is not None:
+                token.throw_if_cancelled()
+            audio_buffer.extend(chunk)
+
+        if not audio_buffer:
+            return
+            yield  # Make this a generator
+
+        # Transcribe buffered audio
+        transcript = self.transcribe(bytes(audio_buffer), language=language, token=token)
+        yield STTChunk(text=transcript, is_final=True, language=language)
+
+    def detect_language(
+        self,
+        audio: bytes,
+        *,
+        token: CancellationToken | None = None,
+    ) -> str:
+        """Detect the language of the audio using whisper.cpp.
+
+        Runs whisper.cpp with `--detect-language` and parses the detected
+        language code from the output.
+
+        Args:
+            audio: 16 kHz mono PCM16 WAV bytes.
+            token: Optional cancellation token.
+
+        Returns:
+            ISO 639-1 language code (e.g., 'en', 'pt', 'es').
+
+        Raises:
+            ProviderRuntimeError: if whisper.cpp fails or language cannot be detected.
+        """
+        if token is not None:
+            token.throw_if_cancelled()
+
+        require_whisper_format(audio)
+        # Build argv with --detect-language flag
+        argv = list(self._argv)
+        # Remove -np (no progress) to allow output
+        argv = [arg for arg in argv if arg != "-np"]
+        argv.extend(["--detect-language"])
+        # Temporarily override argv for this run
+        original_argv = self._argv
+        self._argv = argv
+        try:
+            raw = self.run(audio).decode("utf-8", errors="replace")
+        finally:
+            self._argv = original_argv
+        # Parse detected language from output like "detected language: en"
+        match = re.search(r"detected language:\s*(\w+)", raw, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+        # Fallback: check for "language: en" format
+        match = re.search(r"language:\s*(\w+)", raw, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+        raise ProviderRuntimeError(
+            "whispercpp",
+            "stt",
+            "could not detect language from whisper.cpp output",
+            command=" ".join(argv),
+            stderr=raw[:500],
+        )
 
     @staticmethod
     def parse_transcript(raw: str) -> str:
@@ -156,44 +259,45 @@ class WhisperCppBackend(SubprocessBackend):
         ]
         return " ".join(lines).strip()
 
-    def detect_language(self, audio: bytes) -> str:
-        """Detect the language of the audio using whisper.cpp.
+    # -- Provider protocol -----------------------------------------------------
 
-        Runs whisper.cpp with `--detect-language` and parses the detected
-        language code from the output.
+    @property
+    def name(self) -> str:
+        return "whispercpp"
 
-        Args:
-            audio: 16 kHz mono PCM16 WAV bytes.
+    @property
+    def modality(self) -> str:
+        return "stt"
 
-        Returns:
-            ISO 639-1 language code (e.g., 'en', 'pt', 'es').
+    def capabilities(self) -> ProviderCapabilities:
+        from voicevision.core.protocols import ProviderCapabilities
+        return ProviderCapabilities(
+            streaming=False,
+            languages=frozenset({"auto", "en", "pt", "es", "fr", "de", "it", "zh", "ja", "ko"}),
+            models=frozenset({"tiny", "base", "small", "medium", "large"}),
+            max_concurrent=1,
+            supports_cancellation=True,
+        )
 
-        Raises:
-            BackendExecutionError: if whisper.cpp fails or language cannot be detected.
-        """
-        require_whisper_format(audio)
-        # Build argv with --detect-language flag
-        argv = list(self._argv)
-        # Remove -np (no progress) to allow output
-        argv = [arg for arg in argv if arg != "-np"]
-        argv.extend(["--detect-language"])
-        # Temporarily override argv for this run
-        original_argv = self._argv
-        self._argv = argv
-        try:
-            raw = self.run(audio).decode("utf-8", errors="replace")
-        finally:
-            self._argv = original_argv
-        # Parse detected language from output like "detected language: en"
-        import re
-        match = re.search(r"detected language:\s*(\w+)", raw, re.IGNORECASE)
-        if match:
-            return match.group(1).lower()
-        # Fallback: check for "language: en" format
-        match = re.search(r"language:\s*(\w+)", raw, re.IGNORECASE)
-        if match:
-            return match.group(1).lower()
-        raise BackendExecutionError("whispercpp", "could not detect language from output")
+    def lifecycle(self) -> ProviderLifecycle:
+        return self  # SubprocessBackend has initialize/shutdown/health_check via run/close
+
+    def initialize(self) -> None:
+        """No-op: one-shot backend has no persistent state."""
+        pass
+
+    def shutdown(self) -> None:
+        """No-op: one-shot backend has no persistent state."""
+        self.close()
+
+    def health_check(self) -> bool:
+        return self.available()
 
 
 DEFAULT_MODEL_NAME: Final = "whisper-base.bin"
+
+
+# Forward reference for type hints
+class CancellationToken:
+    """Forward reference."""
+    def throw_if_cancelled(self) -> None: ...

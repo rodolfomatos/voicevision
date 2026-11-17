@@ -1,6 +1,8 @@
 """Speaker identification (diarization-lite) on audio segments.
 
 Simple session-based speaker tracking using audio features.
+
+Implements SpeakerIDProvider protocol (M1).
 """
 
 from __future__ import annotations
@@ -8,6 +10,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from typing import ClassVar
+
+from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle
 
 
 @dataclass
@@ -21,6 +25,8 @@ class SpeakerProfile:
 
 class SimpleSpeakerBackend:
     """Simple session-based speaker identification.
+
+    Implements SpeakerIDProvider protocol.
 
     Tracks speakers per session using simple audio features (energy, spectral
     centroid, zero-crossing rate). Assigns speaker labels (Speaker 1, Speaker 2, ...)
@@ -53,6 +59,10 @@ class SimpleSpeakerBackend:
     def available(cls) -> bool:
         """Always available - no external dependencies."""
         return True
+
+    @classmethod
+    def install_hint(cls) -> str:
+        return "Built-in: no installation required"
 
     def _extract_features(self, audio: bytes, sample_rate: int = 16000) -> list[float]:
         """Extract simple audio features from PCM16 audio.
@@ -103,16 +113,28 @@ class SimpleSpeakerBackend:
             return 0.0
         return dot / (norm_a * norm_b)
 
-    def identify(self, audio: bytes, sample_rate: int = 16000) -> str:
+    # -- SpeakerIDProvider protocol --------------------------------------------
+
+    def identify(
+        self,
+        audio: bytes,
+        *,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> str:
         """Identify speaker for an audio segment.
 
         Args:
             audio: PCM16 mono audio bytes.
             sample_rate: Sample rate in Hz (default 16000).
+            token: Optional cancellation token.
 
         Returns:
             Speaker label (e.g., "Speaker 1", "Speaker 2").
         """
+        if token is not None:
+            token.throw_if_cancelled()
+
         # Skip very short utterances
         duration = len(audio) / (sample_rate * 2)
         if duration < self._min_utterance_duration:
@@ -155,6 +177,63 @@ class SimpleSpeakerBackend:
         self._next_speaker_id += 1
         return label
 
+    def enroll(
+        self,
+        audio: bytes,
+        *,
+        label: str,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> None:
+        """Enroll a new speaker.
+
+        Args:
+            audio: Reference audio for speaker.
+            label: Speaker label.
+            sample_rate: Sample rate in Hz.
+            token: Optional cancellation token.
+        """
+        if token is not None:
+            token.throw_if_cancelled()
+
+        features = self._extract_features(audio, sample_rate)
+        # Assign a fixed ID for enrolled speakers (negative to distinguish)
+        speaker_id = -abs(hash(label)) % 1000000
+        profile = SpeakerProfile(label=label, features=features, count=1)
+        self._speakers[speaker_id] = profile
+
+    # -- Provider protocol -----------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        return "simple"
+
+    @property
+    def modality(self) -> str:
+        return "speakerid"
+
+    def capabilities(self) -> ProviderCapabilities:
+        from voicevision.core.protocols import ProviderCapabilities
+        return ProviderCapabilities(
+            streaming=False,
+            languages=frozenset(),
+            models=frozenset(),
+            max_concurrent=10,
+            supports_cancellation=True,
+        )
+
+    def lifecycle(self) -> ProviderLifecycle:
+        return self
+
+    def initialize(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        self.reset()
+
+    def health_check(self) -> bool:
+        return True
+
 
 # Default backend instance
 _default_speaker_backend: SimpleSpeakerBackend | None = None
@@ -170,7 +249,7 @@ def get_speaker_backend() -> SimpleSpeakerBackend:
 
 def identify_speaker(audio: bytes, sample_rate: int = 16000) -> str:
     """Convenience function to identify speaker using the default backend."""
-    return get_speaker_backend().identify(audio, sample_rate)
+    return get_speaker_backend().identify(audio, sample_rate=sample_rate)
 
 
 def reset_speaker_backend() -> None:
@@ -178,3 +257,9 @@ def reset_speaker_backend() -> None:
     global _default_speaker_backend
     if _default_speaker_backend is not None:
         _default_speaker_backend.reset()
+
+
+# Forward reference for type hints
+class CancellationToken:
+    """Forward reference."""
+    def throw_if_cancelled(self) -> None: ...

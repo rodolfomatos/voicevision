@@ -355,7 +355,11 @@ class TestStreaming:
         ]
         mock_backends["stt_instance"].transcribe.return_value = "hello world"
         # LLM returns chunks incrementally
-        mock_backends["llm_instance"].complete_stream.return_value = iter(["hello ", "world"])
+        from voicevision.core.protocols import LLMChunk
+        mock_backends["llm_instance"].generate_stream.return_value = iter([
+            LLMChunk(content="hello "),
+            LLMChunk(content="world"),
+        ])
         mock_backends["tts_instance"].synthesize.side_effect = [
             b"wav_hello",
             b"wav_world",
@@ -380,8 +384,8 @@ class TestStreaming:
         assert results[0] == b"wav_hello"
         assert results[1] == b"wav_world"
 
-        # Verify complete_stream was called (not complete)
-        mock_backends["llm_instance"].complete_stream.assert_called_once()
+        # Verify generate_stream was called (not complete)
+        mock_backends["llm_instance"].generate_stream.assert_called_once()
         mock_backends["llm_instance"].complete.assert_not_called()
 
     def test_stream_with_empty_transcript(self, mock_backends) -> None:
@@ -392,7 +396,7 @@ class TestStreaming:
             [],
         ]
         mock_backends["stt_instance"].transcribe.return_value = ""
-        mock_backends["llm_instance"].complete_stream.return_value = iter([])
+        mock_backends["llm_instance"].generate_stream.return_value = iter([])
 
         config = PipelineConfig(
             stt_model="/m.bin",
@@ -419,8 +423,12 @@ class TestStreaming:
         ]
         mock_backends["stt_instance"].transcribe.return_value = "hello"
         # LLM returns thinking trace first, then real text
-        mock_backends["llm_instance"].complete_stream.side_effect = [
-            iter(["thinking...", "hello world"]),
+        from voicevision.core.protocols import LLMChunk
+        mock_backends["llm_instance"].generate_stream.side_effect = [
+            iter([
+                LLMChunk(content="thinking...", thinking="thinking..."),
+                LLMChunk(content="hello world"),
+            ]),
         ]
         mock_backends["tts_instance"].synthesize.side_effect = [
             b"wav_hello world",

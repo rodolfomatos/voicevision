@@ -2,16 +2,22 @@
 
 webrtcvad is a pure Python wrapper around WebRTC's VAD, no torch, ~1 MB wheel.
 Operates on 30 ms frames at 8/16/32/48 kHz.
+
+Implements VADProvider protocol (M1).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import ClassVar
+
+from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle
 
 
 class WebrtcVadBackend:
     """Segment a PCM16 stream into utterances using WebRTC VAD.
+
+    Implements VADProvider protocol.
 
     Does NOT perform STT or TTS — only segmentation. Returns utterance
     boundaries as (start_offset, end_offset) in bytes. The caller decides
@@ -54,22 +60,60 @@ class WebrtcVadBackend:
             return False
         return True
 
-    def segment(self, pcm: bytes) -> Iterator[tuple[int, int]]:
-        """Segment PCM16 audio into utterance byte ranges.
+    # install_hint is a class attribute (line 28). The protocol expects a classmethod,
+    # but @runtime_checkable only validates instance methods. Class attribute works.
+
+    def process_frame(
+        self,
+        frame: bytes,
+        *,
+        token: CancellationToken | None = None,
+    ) -> bool:
+        """Process a single audio frame.
 
         Args:
-            pcm: Raw PCM16 mono audio at the configured sample rate.
+            frame: Audio frame (30ms at sample_rate, 16-bit mono).
+            token: Optional cancellation token.
+
+        Returns:
+            True if speech detected in frame.
+        """
+        if token is not None:
+            token.throw_if_cancelled()
+
+        if len(frame) != self._frame_bytes:
+            raise ValueError(f"Frame must be {self._frame_bytes} bytes, got {len(frame)}")
+
+        import webrtcvad
+
+        vad = webrtcvad.Vad(self._aggressiveness)
+        result: bool = vad.is_speech(frame, self._sample_rate)
+        return result
+
+    def segment(
+        self,
+        audio: bytes,
+        *,
+        token: CancellationToken | None = None,
+    ) -> Generator[tuple[int, int], None, None]:
+        """Segment audio into utterance byte ranges.
+
+        Args:
+            audio: Complete PCM16 audio.
+            token: Optional cancellation token.
 
         Yields:
-            (start_byte, end_byte) pairs for each detected utterance.
-            Offsets are byte offsets into the input `pcm`.
+            (start_byte, end_byte) pairs for each utterance.
 
         Raises:
             ValueError: if pcm length is not a multiple of frame_bytes.
         """
-        if len(pcm) % self._frame_bytes != 0:
+        if token is not None:
+            token.throw_if_cancelled()
+
+        if len(audio) % self._frame_bytes != 0:
             raise ValueError(
-                f"PCM length {len(pcm)} not a multiple of frame size {self._frame_bytes}"
+                f"PCM length {len(audio)} not a multiple of frame size {self._frame_bytes}"
             )
 
         import webrtcvad
@@ -81,15 +125,32 @@ class WebrtcVadBackend:
         # Max utterance frames for runaway protection
         max_frames = self._max_utterance_ms // 30
 
-        frame_count = len(pcm) // self._frame_bytes
+        frame_count = len(audio) // self._frame_bytes
+        return self._segment_audio(
+            audio, vad, frame_count, silence_frames, max_frames, token
+        )
+
+    def _segment_audio(
+        self,
+        audio: bytes,
+        vad: object,  # webrtcvad.Vad (avoid import at top level)
+        frame_count: int,
+        silence_frames: int,
+        max_frames: int,
+        token: CancellationToken | None,
+    ) -> Generator[tuple[int, int], None, None]:
+        """Process frames and yield utterance boundaries."""
         in_utterance = False
         utterance_start = 0
         silence_count = 0
         frames_in_utterance = 0
 
         for i in range(frame_count):
+            if token is not None:
+                token.throw_if_cancelled()
+
             start = i * self._frame_bytes
-            frame = pcm[start : start + self._frame_bytes]
+            frame = audio[start : start + self._frame_bytes]
             is_speech = vad.is_speech(frame, self._sample_rate)
 
             if is_speech:
@@ -122,7 +183,53 @@ class WebrtcVadBackend:
 
         # Stream ended while in utterance: emit final utterance
         if in_utterance:
-            yield (utterance_start, len(pcm))
+            yield (utterance_start, len(audio))
+
+    @property
+    def frame_bytes(self) -> int:
+        """Frame size in bytes for the configured sample rate."""
+        return self._frame_bytes
+
+    @property
+    def sample_rate(self) -> int:
+        """Sample rate in Hz."""
+        return self._sample_rate
+
+    # -- Provider protocol -----------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        return "webrtcvad"
+
+    @property
+    def modality(self) -> str:
+        return "vad"
+
+    def capabilities(self) -> ProviderCapabilities:
+        from voicevision.core.protocols import ProviderCapabilities
+        return ProviderCapabilities(
+            streaming=True,
+            languages=frozenset(),  # VAD is language-agnostic
+            models=frozenset(),
+            max_concurrent=10,
+            supports_cancellation=True,
+        )
+
+    def lifecycle(self) -> ProviderLifecycle:
+        return self
+
+    def initialize(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        self.close()
+
+    def health_check(self) -> bool:
+        return self.available()
+
+    def close(self) -> None:
+        """No resources to release — included for uniform backend interface."""
+        pass
 
     def __repr__(self) -> str:
         return (
@@ -130,6 +237,8 @@ class WebrtcVadBackend:
             f"sample_rate={self._sample_rate}, silence_ms={self._silence_ms})"
         )
 
-    def close(self) -> None:
-        """No resources to release — included for uniform backend interface."""
-        pass
+
+# Forward reference for type hints
+class CancellationToken:
+    """Forward reference."""
+    def throw_if_cancelled(self) -> None: ...

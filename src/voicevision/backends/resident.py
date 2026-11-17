@@ -8,6 +8,8 @@ order when the container goes away (ADR-003 §3).
 Kept separate rather than folded into SubprocessBackend because the two have
 almost nothing in common beyond spawning a process. Forcing the LLM daemon
 through a pipe-transport base class would mean overriding most of it.
+
+Implements ProviderLifecycle for resident backends (M1).
 """
 
 from __future__ import annotations
@@ -19,7 +21,10 @@ import tempfile
 import time
 from typing import IO, ClassVar
 
-from voicevision.errors import BackendExecutionError, BackendNotAvailableError
+from voicevision.errors import (
+    BackendExecutionError,
+    BackendNotAvailableError,
+)
 
 #: How often to poll a readiness endpoint.
 POLL_INTERVAL = 0.25
@@ -59,11 +64,14 @@ def spawn_process(
         )
     except FileNotFoundError as exc:
         raise BackendNotAvailableError(
-            name, "Install the backend binary; see install_hint."
+            name,
+            "Install the backend binary; see install_hint.",
         ) from exc
     except OSError as exc:
         raise BackendExecutionError(
-            name, f"could not start process: {exc}", command=" ".join(argv)
+            name,
+            f"could not start process: {exc}",
+            command=" ".join(argv),
         ) from exc
 
 
@@ -89,6 +97,8 @@ class ResidentBackend:
     traffic yet. Returning immediately and assuming success is a bug: the first
     request would race model loading and fail in a way that looks like a
     transport problem.
+
+    Implements ProviderLifecycle for resident backends.
     """
 
     executable: ClassVar[str] = ""
@@ -147,6 +157,9 @@ class ResidentBackend:
         import shutil
 
         return bool(cls.executable) and shutil.which(cls.executable) is not None
+
+    # install_hint is a class attribute (line 105). The protocol expects a classmethod,
+    # but @runtime_checkable only validates instance methods. Class attribute works.
 
     def describe(self) -> str:
         state = "running" if self.is_running else "stopped"
@@ -251,6 +264,25 @@ class ResidentBackend:
         except (OSError, ValueError):
             return ""
         return data.decode("utf-8", errors="replace")
+
+    # -- ProviderLifecycle -------------------------------------------------
+
+    def initialize(self) -> None:
+        """Start the daemon if not already running."""
+        self.ensure_running()
+
+    def shutdown(self) -> None:
+        """Shut the daemon down."""
+        self.close()
+
+    def health_check(self) -> bool:
+        """Check if daemon is running and responsive."""
+        if not self.is_running:
+            return False
+        try:
+            return self._probe()
+        except Exception:
+            return False
 
     def close(self) -> None:
         """Shut the process down, escalating to SIGKILL if it hangs.

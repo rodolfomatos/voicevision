@@ -15,29 +15,54 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 from voicevision.core.protocols import (
-    CameraBackend,
-    LLMBackend,
-    STTBackend,
-    TTSBackend,
-    VisionBackend,
+    Completion,
+    EmotionProvider,
+    EmotionResult,
+    LLMChunk,
+    LLMProvider,
+    Provider,
+    ProviderCapabilities,
+    ProviderLifecycle,
+    SpeakerIDProvider,
+    STTChunk,
+    STTProvider,
+    TTSChunk,
+    TTSProvider,
+    VADProvider,
+    VisionProvider,
+    WakeWordProvider,
 )
-from voicevision.core.registry import BackendRegistry
+from voicevision.core.registry import BackendRegistry, ProviderRegistry
 
 if TYPE_CHECKING:
-    from voicevision.core.config import VoiceVisionConfig
+    from voicevision.core.config import PipelineConfig, VoiceVisionConfig
 
 _LAZY: dict[str, str] = {
     "VoiceVisionConfig": "voicevision.core.config",
+    "PipelineConfig": "voicevision.core.config",
 }
 
 __all__ = [
+    "ProviderRegistry",
     "BackendRegistry",
     "VoiceVisionConfig",
-    "LLMBackend",
-    "STTBackend",
-    "TTSBackend",
-    "VisionBackend",
-    "CameraBackend",
+    "PipelineConfig",
+    "LLMProvider",
+    "STTProvider",
+    "TTSProvider",
+    "VADProvider",
+    "VisionProvider",
+    "WakeWordProvider",
+    "SpeakerIDProvider",
+    "EmotionProvider",
+    "Provider",
+    "ProviderCapabilities",
+    "ProviderLifecycle",
+    "STTChunk",
+    "LLMChunk",
+    "TTSChunk",
+    "Completion",
+    "EmotionResult",
 ]
 
 

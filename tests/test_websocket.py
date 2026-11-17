@@ -788,8 +788,9 @@ class TestServiceStreaming:
             def __init__(self, **kwargs: Any) -> None:
                 created.append(self)
 
-            def complete_stream(self, text: str, *, max_tokens: int = 512) -> Iterator[str]:
-                yield f"{text}:{max_tokens}"
+            def generate_stream(self, text: str, *, max_tokens: int = 512):
+                from voicevision.core.protocols import LLMChunk
+                yield LLMChunk(content=f"{text}:{max_tokens}")
 
             def close(self) -> None:
                 pass

@@ -313,7 +313,9 @@ class VoiceVisionService:
                 host=self.config.llm_host,
                 port=self.config.llm_port,
             )
-        yield from self._llm.complete_stream(text, max_tokens=max_tokens)
+        for llm_chunk in self._llm.generate_stream(text, max_tokens=max_tokens):
+            if llm_chunk.content:
+                yield llm_chunk.content
 
     def close(self) -> None:
         """Release every backend that holds resources.

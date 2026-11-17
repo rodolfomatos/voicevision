@@ -14,6 +14,33 @@ import sys
 import pytest
 
 
+@pytest.mark.no_cover
+def test_protocol_import_stays_cheap() -> None:
+    """Importing the interfaces alone must not drag in the config."""
+    code = (
+        "import sys; from voicevision.core.protocols import LLMProvider; "
+        "assert 'pydantic_settings' not in sys.modules"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.no_cover
+def test_core_modules_import_without_config() -> None:
+    """The whole core must be reachable without touching the settings lib."""
+    code = (
+        "import voicevision, voicevision.core, voicevision.core.protocols, "
+        "voicevision.core.registry, voicevision.errors;"
+        "assert 'pydantic_settings' not in __import__('sys').modules"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+
+
 class TestImportCost:
     def test_import_does_not_load_pydantic(self) -> None:
         """The whole point: pydantic must be absent after a bare import."""
@@ -21,29 +48,6 @@ class TestImportCost:
             "import sys; import voicevision; "
             "assert 'pydantic' not in sys.modules, sorted(sys.modules); "
             "assert 'pydantic_settings' not in sys.modules"
-        )
-        result = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, check=False
-        )
-        assert result.returncode == 0, result.stderr
-
-    def test_protocol_import_stays_cheap(self) -> None:
-        """Importing the interfaces alone must not drag in the config."""
-        code = (
-            "import sys; from voicevision.core.protocols import LLMBackend; "
-            "assert 'pydantic_settings' not in sys.modules"
-        )
-        result = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, check=False
-        )
-        assert result.returncode == 0, result.stderr
-
-    def test_core_modules_import_without_config(self) -> None:
-        """The whole core must be reachable without touching the settings lib."""
-        code = (
-            "import voicevision, voicevision.core, voicevision.core.protocols, "
-            "voicevision.core.registry, voicevision.errors;"
-            "assert 'pydantic_settings' not in __import__('sys').modules"
         )
         result = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, check=False
@@ -71,7 +75,7 @@ class TestLazyAttribute:
     def test_eager_attributes_available(self) -> None:
         import voicevision
 
-        for name in ("BackendRegistry", "LLMBackend", "STTBackend", "TTSBackend"):
+        for name in ("BackendRegistry", "LLMProvider", "STTProvider", "TTSProvider"):
             assert getattr(voicevision, name) is not None
 
     def test_unknown_attribute_raises_attribute_error(self) -> None:
@@ -98,7 +102,7 @@ class TestLazyAttribute:
     def test_version_is_exposed(self) -> None:
         import voicevision
 
-        assert voicevision.__version__ == "0.1.0"
+        assert voicevision.__version__ == "0.3.0"
 
 
 class TestErrorExports:

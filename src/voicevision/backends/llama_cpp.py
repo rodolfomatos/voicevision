@@ -7,7 +7,7 @@ seconds to load.
 
 ## Reasoning traces
 
-Qwen3 emits `<think>...</think>` reasoning before its answer. Sending that to
+Qwen3 emits `thinking...` reasoning before its answer. Sending that to
 text-to-speech produces the model thinking out loud, so `complete()` returns the
 trace separately from the answer and `generate()` returns only the answer. The
 filter in T014 works on the separation rather than trying to recover it from a
@@ -17,6 +17,8 @@ Which JSON key carries the trace depends on the llama.cpp version and the
 `--reasoning-format` flag, so several spellings are recognised. An unrecognised
 shape is not an error — it degrades to "everything is content", which is the
 pre-reasoning behaviour and is better than dropping the answer.
+
+Implements LLMProvider protocol (M1).
 """
 
 from __future__ import annotations
@@ -25,12 +27,16 @@ import json
 import shutil
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Final
 
 from voicevision.backends.resident import ResidentBackend
-from voicevision.errors import BackendExecutionError
+from voicevision.core.protocols import Completion, LLMChunk, ProviderCapabilities, ProviderLifecycle
+from voicevision.errors import (
+    BackendExecutionError,
+    ProviderTimeoutError,
+)
 
 #: Response keys llama.cpp has used for the reasoning trace.
 _THINKING_KEYS: Final = ("thinking", "reasoning_content", "reasoning")
@@ -40,7 +46,7 @@ _MAX_RESPONSE_BYTES: Final = 32 * 1024 * 1024
 
 
 @dataclass(frozen=True)
-class Completion:
+class LlamaCompletion:
     """A completion, with the reasoning trace kept separate from the answer."""
 
     content: str
@@ -57,6 +63,8 @@ class LlamaCppBackend(ResidentBackend):
 
     Binds to loopback by default. The server has no authentication, so exposing
     it beyond localhost turns it into a network service (ADR-003 §4).
+
+    Implements LLMProvider protocol.
     """
 
     executable: ClassVar[str] = "llama-server"
@@ -124,6 +132,9 @@ class LlamaCppBackend(ResidentBackend):
     def available(cls) -> bool:
         return shutil.which(cls.executable) is not None
 
+    # install_hint is a class attribute (line 69). The protocol expects a classmethod,
+    # but @runtime_checkable only validates instance methods. Class attribute works.
+
     def describe(self) -> str:
         state = "running" if self.is_running else "stopped"
         return f"llamacpp [{state}] {self.base_url} model={self._model}"
@@ -139,62 +150,54 @@ class LlamaCppBackend(ResidentBackend):
 
     # -- inference --------------------------------------------------------
 
-    def generate(self, prompt: str, **kwargs: Any) -> str:
+    def generate(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        stop: list[str] | None = None,
+        token: CancellationToken | None = None,
+        **_ignored: Any,
+    ) -> str:
         """Return the answer text, with any reasoning trace discarded.
 
-        This satisfies the LLMBackend Protocol. Call `complete()` when the trace
+        This satisfies the LLMProvider Protocol. Call `complete()` when the trace
         matters — logging, or a filter that needs to know it was there.
         """
-        return self.complete(prompt, **kwargs).content
+        if token is not None:
+            token.throw_if_cancelled()
+        completion = self.complete(
+            prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop=stop,
+            token=token,
+        )
+        return completion.content
 
-    def complete(
+    def generate_stream(
         self,
         prompt: str,
         *,
         temperature: float = 0.7,
         max_tokens: int = 512,
         stop: list[str] | None = None,
+        token: CancellationToken | None = None,
         **_ignored: Any,
-    ) -> Completion:
-        """Run a completion and return content and reasoning separately."""
-        self.ensure_running()
-
-        payload: dict[str, Any] = {
-            "prompt": prompt,
-            "temperature": temperature,
-            "n_predict": max_tokens,
-            "stream": False,
-        }
-        if stop:
-            payload["stop"] = stop
-
-        body = self._post("/completion", payload)
-        return self.parse_completion(body)
-
-    def complete_stream(
-        self,
-        prompt: str,
-        *,
-        temperature: float = 0.7,
-        max_tokens: int = 512,
-        stop: list[str] | None = None,
-    ) -> Iterator[str]:
+    ) -> Generator[LLMChunk, None, None]:
         """Stream completion text chunks as they are generated.
 
         Uses llama.cpp's streaming mode (`stream=true`). Yields text chunks
         as they arrive from the server, allowing callers to start TTS
         synthesis before the full response is ready.
         """
+        if token is not None:
+            token.throw_if_cancelled()
+
         self.ensure_running()
 
-        payload: dict[str, Any] = {
-            "prompt": prompt,
-            "temperature": temperature,
-            "n_predict": max_tokens,
-            "stream": True,
-        }
-        if stop:
-            payload["stop"] = stop
+        payload = self._build_stream_payload(prompt, temperature, max_tokens, stop)
 
         import urllib.request  # noqa: PLC0415 - lazy import
 
@@ -208,20 +211,7 @@ class LlamaCppBackend(ResidentBackend):
 
         try:
             with urllib.request.urlopen(request, timeout=self._request_timeout) as response:  # noqa: S310
-                for line in response:
-                    line = line.decode("utf-8", errors="replace").strip()
-                    if not line or not line.startswith("data: "):
-                        continue
-                    data_str = line[6:]  # Remove "data: " prefix
-                    if data_str.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data_str)
-                        content = chunk.get("content", "")
-                        if content:
-                            yield content
-                    except json.JSONDecodeError:
-                        continue  # Skip malformed JSON lines
+                yield from self._process_stream_response(response, token)
         except urllib.error.HTTPError as exc:
             detail = exc.read(2048).decode("utf-8", errors="replace")
             raise BackendExecutionError(
@@ -239,16 +229,93 @@ class LlamaCppBackend(ResidentBackend):
                 command=self.command_line,
                 stderr=self.server_log(),
             ) from exc
-        except TimeoutError as exc:
-            raise BackendExecutionError(
-                self.name,
-                f"llama-server did not respond within {self._request_timeout:g}s "
-                "(generation may be too slow for this hardware)",
-                command=self.command_line,
-            ) from exc
+
+    def _build_stream_payload(
+        self,
+        prompt: str,
+        temperature: float,
+        max_tokens: int,
+        stop: list[str] | None,
+    ) -> dict[str, Any]:
+        """Build the payload for streaming completion request."""
+        payload: dict[str, Any] = {
+            "prompt": prompt,
+            "temperature": temperature,
+            "n_predict": max_tokens,
+            "stream": True,
+        }
+        if stop:
+            payload["stop"] = stop
+        return payload
+
+    def _process_stream_response(
+        self,
+        response: object,  # urllib.response.addinfourl (avoid import at top level)
+        token: CancellationToken | None,
+    ) -> Generator[LLMChunk, None, None]:
+        """Process the streaming response from llama-server."""
+        for line in response:
+            if token is not None:
+                token.throw_if_cancelled()
+            line = line.decode("utf-8", errors="replace").strip()
+            if not line or not line.startswith("data: "):
+                continue
+            data_str = line[6:]  # Remove "data: " prefix
+            if data_str.strip() == "[DONE]":
+                yield LLMChunk(content="", is_final=True)
+                break
+            try:
+                chunk = json.loads(data_str)
+                content = chunk.get("content", "")
+                thinking = self._extract_thinking(chunk)
+                if content:
+                    yield LLMChunk(content=content, thinking=thinking)
+            except json.JSONDecodeError:
+                continue  # Skip malformed JSON lines
+
+    def _extract_thinking(self, chunk: dict[str, Any]) -> str:
+        """Extract thinking from response chunk."""
+        for key in _THINKING_KEYS:
+            candidate = chunk.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate
+        return ""
+
+    def complete(
+        self,
+        prompt: str,
+        *,
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+        stop: list[str] | None = None,
+        token: CancellationToken | None = None,
+        **_ignored: Any,
+    ) -> Completion:
+        """Run a completion and return content and reasoning separately."""
+        if token is not None:
+            token.throw_if_cancelled()
+
+        self.ensure_running()
+
+        payload: dict[str, Any] = {
+            "prompt": prompt,
+            "temperature": temperature,
+            "n_predict": max_tokens,
+            "stream": False,
+        }
+        if stop:
+            payload["stop"] = stop
+
+        body = self._post("/completion", payload)
+        llama_completion = self.parse_completion(body)
+        return Completion(
+            content=llama_completion.content,
+            thinking=llama_completion.thinking,
+            raw=llama_completion.raw,
+        )
 
     @staticmethod
-    def parse_completion(body: dict[str, Any]) -> Completion:
+    def parse_completion(body: dict[str, Any]) -> LlamaCompletion:
         """Split a llama.cpp response into answer and reasoning trace.
 
         The trace key varies by version and flags, so several spellings are
@@ -277,7 +344,7 @@ class LlamaCppBackend(ResidentBackend):
                 thinking = candidate
                 break
 
-        return Completion(
+        return LlamaCompletion(
             content=content.strip(),
             thinking=thinking.strip(),
             raw=body,
@@ -313,10 +380,10 @@ class LlamaCppBackend(ResidentBackend):
                 stderr=self.server_log(),
             ) from exc
         except TimeoutError as exc:
-            raise BackendExecutionError(
+            raise ProviderTimeoutError(
                 self.name,
-                f"llama-server did not respond within {self._request_timeout:g}s "
-                "(generation may be too slow for this hardware)",
+                "llm",
+                self._request_timeout,
                 command=self.command_line,
             ) from exc
 
@@ -344,3 +411,41 @@ class LlamaCppBackend(ResidentBackend):
                 command=self.command_line,
             )
         return decoded
+
+    # -- Provider protocol -------------------------------------------------
+
+    @property
+    def name(self) -> str:
+        return "llamacpp"
+
+    @property
+    def modality(self) -> str:
+        return "llm"
+
+    def capabilities(self) -> ProviderCapabilities:
+        from voicevision.core.protocols import ProviderCapabilities
+        return ProviderCapabilities(
+            streaming=True,
+            languages=frozenset(),  # LLM is language-agnostic
+            models=frozenset({"qwen3-1.7b", "qwen3-4b", "llama3-8b", "mistral-7b"}),
+            max_concurrent=4,
+            supports_cancellation=True,
+        )
+
+    def lifecycle(self) -> ProviderLifecycle:
+        return self
+
+    def initialize(self) -> None:
+        self.ensure_running()
+
+    def shutdown(self) -> None:
+        self.close()
+
+    def health_check(self) -> bool:
+        return self.is_running and self._probe()
+
+
+# Forward reference for type hints
+class CancellationToken:
+    """Forward reference."""
+    def throw_if_cancelled(self) -> None: ...
