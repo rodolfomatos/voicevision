@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from voicevision.backends.adaptive_vad import AdaptiveVadBackend
 from voicevision.backends.emotion import (
     SimpleEmotionBackend,
     detect_emotion,
@@ -30,6 +31,7 @@ __all__ = [
     "LlamaCppBackend",
     "PiperBackend",
     "WebrtcVadBackend",
+    "AdaptiveVadBackend",
     "MoondreamBackend",
     "OnnxVisionBackend",
     "SimpleEmotionBackend",

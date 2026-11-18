@@ -4,7 +4,7 @@ title: VAD Adaptativo — Port Hex's speech_islands with Adaptive Threshold
 sprint: M2-realtime-voice
 priority: high
 status: todo
-created: 2026-11-17
+created: 2026-11-18
 ---
 
 # T086 — VAD Adaptativo
@@ -42,7 +42,7 @@ M2.2 from architecture audit. Current `WebrtcVadBackend` uses fixed aggressivene
 ## Dependencies
 
 - T069-T074 (M1) — Done
-- T085 (sentence boundary) — Optional
+- T085 (sentence boundary) — Done
 
 ## Rollback
 
