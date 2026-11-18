@@ -4,7 +4,7 @@ title: Unified CancellationToken
 sprint: M1-core-abstraction
 priority: high
 status: todo
-created: 2026-11-16
+created: 2026-11-18
 ---
 
 # T074 — Unified CancellationToken
@@ -46,11 +46,11 @@ M1.6 from architecture audit. No cancellation mechanism exists. Need a unified `
 
 **In scope:**
 - `src/voicevision/core/cancellation.py` — new module
-- `src/voicevision/backends/base.py` — update SubprocessBackend
+- `src/voicevision/backends/subprocess_backend.py` — update SubprocessBackend
 - `tests/core/test_cancellation.py`
 
 **Out of scope:**
-- Barge-in detection logic (M2.3)
+- Barge-in detection logic (T087)
 - Network request cancellation (future HTTP client)
 
 ## Dependencies

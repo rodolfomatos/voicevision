@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
+from voicevision.core.cancellation import CancellationToken
 from voicevision.core.protocols import (
     Completion,
     EmotionProvider,
@@ -63,6 +64,7 @@ __all__ = [
     "TTSChunk",
     "Completion",
     "EmotionResult",
+    "CancellationToken",
 ]
 
 

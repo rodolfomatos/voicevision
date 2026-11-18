@@ -41,6 +41,7 @@ from voicevision.core import (
     VisionProvider,
     WakeWordProvider,
 )
+from voicevision.core.cancellation import CancellationToken
 from voicevision.errors import (
     AudioDeviceError,
     AudioError,
@@ -108,6 +109,7 @@ __all__ = [
     "spread_words",
     "segments_from_words",
     "extract_sentences",
+    "CancellationToken",
     "VoiceVisionError",
     "ConfigurationError",
     "ProviderError",

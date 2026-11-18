@@ -4,7 +4,7 @@ title: Barge-in Detection + Interruption
 sprint: M2-realtime-voice
 priority: high
 status: todo
-created: 2026-11-17
+created: 2026-11-18
 ---
 
 # T087 — Barge-in Detection + Interruption
@@ -49,7 +49,7 @@ M2.3 from architecture audit. No barge-in exists currently. When user speaks dur
 
 - T069-T074 (M1) — Done
 - T074 (CancellationToken) — Placeholder, needs implementation
-- T086 (Adaptive VAD) — Optional, improves detection
+- T086 (Adaptive VAD) — Done, improves detection
 
 ## Rollback
 
