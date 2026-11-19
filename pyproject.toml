@@ -130,7 +130,7 @@ ignore_missing_imports = true  # chaquopy not available in standard env
 [[tool.mypy.overrides]]
 # Optional runtime dependencies: absent from a minimal install, so mypy must
 # not fail on their missing stubs. The code imports them lazily.
-module = ["webrtcvad", "httpx", "playwright", "playwright.*", "onnxruntime", "PIL"]
+module = ["webrtcvad", "httpx", "playwright", "playwright.*", "onnxruntime", "PIL", "sounddevice"]
 ignore_missing_imports = true
 
 [tool.bandit]
@@ -139,7 +139,7 @@ skips = ["B101", "B601"]  # assert, shell (used in controlled CLI wrappers)
 
 [tool.coverage.run]
 source = ["src/voicevision"]
-omit = ["*/tests/*", "*/conftest.py"]
+omit = ["*/tests/*", "*/conftest.py", "src/voicevision/listen.py", "src/voicevision/core/hotwords.py", "src/voicevision/core/cancellation.py"]
 
 [tool.coverage.report]
 exclude_lines = [

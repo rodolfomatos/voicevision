@@ -109,8 +109,16 @@ class DummyVAD(_base_provider_methods("dummy", "vad")):
         return 960
 
     @property
+    def frame_ms(self) -> int:
+        return 30
+
+    @property
     def sample_rate(self) -> int:
         return 16000
+
+    @property
+    def max_utterance_ms(self) -> int:
+        return 30000
 
 
 class DummyWakeWord(_base_provider_methods("dummy", "wakeword")):

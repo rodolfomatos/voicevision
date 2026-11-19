@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import ClassVar
 
+from voicevision.core.cancellation import CancellationToken
 from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle
 
 
@@ -35,8 +36,6 @@ class AdaptiveVadBackend:
 
     #: Default noise percentile for noise floor estimation
     DEFAULT_NOISE_PERCENTILE: ClassVar[int] = 10
-
-    _install_hint: ClassVar[str] = "Built-in: no installation required"
 
     def __init__(
         self,
@@ -68,7 +67,7 @@ class AdaptiveVadBackend:
 
     @classmethod
     def install_hint(cls) -> str:
-        return cls._install_hint
+        return "Built-in: no installation required"
 
     # -- VADProvider protocol --------------------------------------------------
 
@@ -158,6 +157,16 @@ class AdaptiveVadBackend:
     @property
     def frame_bytes(self) -> int:
         return self._frame_bytes
+
+    @property
+    def frame_ms(self) -> int:
+        """Frame duration in milliseconds."""
+        return self._frame_ms
+
+    @property
+    def max_utterance_ms(self) -> int:
+        """Maximum utterance duration in milliseconds (not currently enforced)."""
+        return 30000  # Default, same as WebRTC VAD
 
     @property
     def sample_rate(self) -> int:
@@ -280,9 +289,3 @@ class AdaptiveVadBackend:
             if avg_rms > self.ISLAND_SILENCE_RMS:
                 filtered.append((start, end))
         return filtered
-
-
-# Forward reference for type hints
-class CancellationToken:
-    """Forward reference."""
-    def throw_if_cancelled(self) -> None: ...

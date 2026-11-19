@@ -396,8 +396,18 @@ class VADProvider(Provider, Protocol):
         ...
 
     @property
+    def frame_ms(self) -> int:
+        """Frame duration in milliseconds."""
+        ...
+
+    @property
     def sample_rate(self) -> int:
         """Sample rate in Hz."""
+        ...
+
+    @property
+    def max_utterance_ms(self) -> int:
+        """Maximum utterance duration in milliseconds."""
         ...
 
 

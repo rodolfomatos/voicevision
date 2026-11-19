@@ -354,7 +354,7 @@ class ProviderRegistry:
         registry.register_class(
             "vad",
             "webrtcvad",
-            WebrtcVadBackend,  # type: ignore[arg-type]
+            WebrtcVadBackend,
             default=True,
             aggressiveness=config.vad_aggressiveness,
             sample_rate=config.vad_sample_rate,

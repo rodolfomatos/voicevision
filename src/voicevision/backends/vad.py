@@ -9,7 +9,7 @@ Implements VADProvider protocol (M1).
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle
 
@@ -28,7 +28,10 @@ class WebrtcVadBackend:
     """
 
     # webrtcvad is a pure Python package; the import itself is the probe.
-    install_hint: ClassVar[str] = "pip install webrtcvad-wheels"
+
+    @classmethod
+    def install_hint(cls) -> str:
+        return "pip install webrtcvad-wheels"
 
     def __init__(
         self,
@@ -62,9 +65,6 @@ class WebrtcVadBackend:
         except ImportError:
             return False
         return True
-
-    # install_hint is a class attribute (line 28). The protocol expects a classmethod,
-    # but @runtime_checkable only validates instance methods. Class attribute works.
 
     def process_frame(
         self,
@@ -192,6 +192,16 @@ class WebrtcVadBackend:
     def frame_bytes(self) -> int:
         """Frame size in bytes for the configured sample rate."""
         return self._frame_bytes
+
+    @property
+    def frame_ms(self) -> int:
+        """Frame duration in milliseconds."""
+        return 30  # Fixed for WebRTC VAD
+
+    @property
+    def max_utterance_ms(self) -> int:
+        """Maximum utterance duration in milliseconds."""
+        return self._max_utterance_ms
 
     @property
     def sample_rate(self) -> int:
