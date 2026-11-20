@@ -18,6 +18,11 @@ from voicevision.backends.speaker import (
     identify_speaker,
     reset_speaker_backend,
 )
+from voicevision.backends.speaker_pyannote import (
+    PyannoteSpeakerBackend,
+    SpeakerStore,
+    cosine_similarity,
+)
 from voicevision.backends.subprocess_backend import SubprocessBackend
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.vision import MoondreamBackend
@@ -42,6 +47,9 @@ __all__ = [
     "detect_emotion",
     "get_emotion_backend",
     "SimpleSpeakerBackend",
+    "PyannoteSpeakerBackend",
+    "SpeakerStore",
+    "cosine_similarity",
     "identify_speaker",
     "get_speaker_backend",
     "reset_speaker_backend",

@@ -8,10 +8,16 @@ Implements SpeakerIDProvider protocol (M1).
 from __future__ import annotations
 
 import math
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle
+from voicevision.core.cancellation import CancellationToken
+from voicevision.core.protocols import (
+    ProviderCapabilities,
+    ProviderLifecycle,
+    SpeakerSegment,
+)
 
 
 @dataclass
@@ -202,6 +208,36 @@ class SimpleSpeakerBackend:
         profile = SpeakerProfile(label=label, features=features, count=1)
         self._speakers[speaker_id] = profile
 
+    def remove(self, label: str) -> bool:
+        """Remove an enrolled or auto-assigned speaker by label."""
+        for speaker_id, profile in list(self._speakers.items()):
+            if profile.label == label:
+                del self._speakers[speaker_id]
+                return True
+        return False
+
+    def identify_stream(
+        self,
+        audio_chunks: Iterable[bytes],
+        *,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> Generator[SpeakerSegment, None, None]:
+        """Identify each incoming chunk as a segment (feature-based fallback)."""
+        for chunk in audio_chunks:
+            label = self.identify(chunk, sample_rate=sample_rate, token=token)
+            yield SpeakerSegment(label, 0, len(chunk) // (sample_rate * 2) * 1000)
+
+    def diarize(
+        self,
+        audio: bytes,
+        *,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> list[SpeakerSegment]:
+        """Diarize by identifying the whole buffer as one turn."""
+        return list(self.identify_stream(iter([audio]), sample_rate=sample_rate, token=token))
+
     # -- Provider protocol -----------------------------------------------------
 
     @property
@@ -257,9 +293,3 @@ def reset_speaker_backend() -> None:
     global _default_speaker_backend
     if _default_speaker_backend is not None:
         _default_speaker_backend.reset()
-
-
-# Forward reference for type hints
-class CancellationToken:
-    """Forward reference."""
-    def throw_if_cancelled(self) -> None: ...

@@ -215,6 +215,19 @@ class TestProviderRegistryConfigFactory:
         assert registry.is_registered("tts", "piper")
         assert registry.is_registered("vad", "webrtcvad")
 
+    def test_create_from_config_registers_pyannote_speaker(self) -> None:
+        """T092: the pyannote backend is selectable via the config factory."""
+        from voicevision.core.config import PipelineConfig
+
+        config = PipelineConfig(
+            speaker_enabled=True,
+            speakerid_backend="pyannote",
+            speakerid_params={"threshold": 0.6},
+        )
+        registry = ProviderRegistry.get_instance().create_from_config(config)
+        assert registry.is_registered("speakerid", "pyannote")
+        registry.shutdown_all()
+
 
 class TestBackwardsCompatibility:
     """Test BackendRegistry wrapper for backwards compatibility."""

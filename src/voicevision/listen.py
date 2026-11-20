@@ -14,7 +14,7 @@ from typing import Any
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
 from voicevision.core.cancellation import CancellationToken
-from voicevision.core.protocols import VADProvider
+from voicevision.core.protocols import SpeakerIDProvider, VADProvider
 from voicevision.errors import AudioDeviceError
 
 
@@ -78,9 +78,11 @@ class ListenSession:
         vad_max_utterance_ms: int = 30000,
         stt_language: str = "en",
         cancellation_token: CancellationToken | None = None,
+        speaker: SpeakerIDProvider | None = None,
     ) -> None:
         self._vad = vad
         self._stt = stt
+        self._speaker = speaker
         self._sample_rate = sample_rate
         self._frame_ms = frame_ms
         self._pre_roll_ms = pre_roll_ms
@@ -238,7 +240,15 @@ class ListenSession:
             return
 
         if transcript.strip():
-            print(f"> {transcript}")
+            if self._speaker is not None:
+                try:
+                    label = self._speaker.identify(audio, token=self._cancellation_token)
+                except Exception:
+                    label = ""
+            else:
+                label = ""
+            prefix = f"[{label}] " if label else ""
+            print(f"{prefix}> {transcript}")
 
 
 def main(
@@ -251,6 +261,9 @@ def main(
     stt_language: str = "en",
     pre_roll_ms: int = 500,
     use_adaptive_vad: bool = False,
+    speaker_backend: str = "",
+    speaker_db_path: str = "",
+    speaker_threshold: float = 0.7,
 ) -> None:
     """Main entry point for voicevision-listen."""
     if not stt_model:
@@ -276,6 +289,17 @@ def main(
             max_utterance_ms=vad_max_utterance_ms,
         )
 
+    # T092: optional speaker identification over each utterance.
+    speaker: SpeakerIDProvider | None = None
+    if speaker_backend == "pyannote":
+        from voicevision.backends.speaker_pyannote import PyannoteSpeakerBackend
+
+        speaker = PyannoteSpeakerBackend(
+            threshold=speaker_threshold,
+            db_path=speaker_db_path or None,
+        )
+        speaker.initialize()
+
     print("Listening... Press Ctrl+C to stop")
     with ListenSession(
         vad=vad,
@@ -285,6 +309,7 @@ def main(
         vad_silence_ms=vad_silence_ms,
         vad_max_utterance_ms=vad_max_utterance_ms,
         stt_language=stt_language,
+        speaker=speaker,
     ):
         try:
             while True:

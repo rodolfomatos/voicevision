@@ -143,6 +143,15 @@ class DummySpeakerID(_base_provider_methods("dummy", "speakerid")):
     def reset(self) -> None:
         pass
 
+    def remove(self, label: str) -> bool:
+        return False
+
+    def identify_stream(self, audio_chunks: object, **kwargs: object) -> object:
+        return iter(())
+
+    def diarize(self, audio: bytes, **kwargs: object) -> list:
+        return []
+
 
 class DummyEmotion(_base_provider_methods("dummy", "emotion")):
     def detect(self, text: str, **kwargs: object) -> EmotionResult:

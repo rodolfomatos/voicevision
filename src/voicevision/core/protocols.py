@@ -8,7 +8,7 @@ Version: 2.0.0 (M1 Core Abstraction)
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator, Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -114,6 +114,24 @@ class TTSChunk:
     audio: bytes
     is_final: bool = False
     sample_rate: int = 16000
+
+
+@dataclass(frozen=True)
+class SpeakerMatch:
+    """Result of identifying a single utterance."""
+
+    label: str
+    score: float = 0.0
+
+
+@dataclass(frozen=True)
+class SpeakerSegment:
+    """A labelled span of audio, used by diarization and streaming speaker ID."""
+
+    label: str
+    start_ms: int
+    end_ms: int
+    score: float = 0.0
 
 
 # =============================================================================
@@ -518,6 +536,30 @@ class WakeWordProvider(Provider, Protocol):
 
 
 @runtime_checkable
+class SpeakerStoreProtocol(Protocol):
+    """Persistence contract for enrolled speaker embeddings (T092)."""
+
+    __slots__ = ()
+
+    @property
+    def path(self) -> str | None: ...
+
+    def add(self, label: str, vector: Iterable[float]) -> None: ...
+
+    def remove(self, label: str) -> bool: ...
+
+    def vectors(self, label: str) -> tuple[tuple[float, ...], ...]: ...
+
+    def mean(self, label: str) -> tuple[float, ...] | None: ...
+
+    def labels(self) -> tuple[str, ...]: ...
+
+    def clear(self) -> None: ...
+
+    def flush(self) -> None: ...
+
+
+@runtime_checkable
 class SpeakerIDProvider(Provider, Protocol):
     """Speaker identification provider."""
 
@@ -566,6 +608,30 @@ class SpeakerIDProvider(Provider, Protocol):
 
     def reset(self) -> None:
         """Reset speaker profiles for new session."""
+        ...
+
+    def remove(self, label: str) -> bool:
+        """Remove an enrolled speaker. Returns True if it existed (T092)."""
+        ...
+
+    def identify_stream(
+        self,
+        audio_chunks: Iterable[bytes],
+        *,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> Generator[SpeakerSegment, None, None]:
+        """Yield speaker labels for successive audio windows (T092)."""
+        ...
+
+    def diarize(
+        self,
+        audio: bytes,
+        *,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> list[SpeakerSegment]:
+        """Split multi-speaker audio into labelled turns (T092)."""
         ...
 
 

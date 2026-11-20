@@ -213,6 +213,8 @@ class PipelineConfig:
 
     # Speaker identification
     speaker_enabled: bool = False
+    speakerid_backend: str = "simple"
+    speakerid_params: dict[str, Any] = field(default_factory=dict)
 
     # Provider registry (populated from VoiceVisionConfig)
     _provider_registry: ProviderRegistry | None = field(default=None, repr=False)
@@ -388,4 +390,6 @@ def create_pipeline_config_from_env() -> PipelineConfig:
         # Emotion/Speaker
         emotion_enabled=env_config.emotion_backend != "dummy",
         speaker_enabled=env_config.speakerid_backend != "dummy",
+        speakerid_backend=env_config.speakerid_backend,
+        speakerid_params=dict(env_config.speakerid_params),
     )

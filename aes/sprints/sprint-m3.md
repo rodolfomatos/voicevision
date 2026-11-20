@@ -12,9 +12,9 @@ status: active
 
 | ID | Title | Status |
 |----|-------|--------|
-| T090 | Wake Word Improvements - Multiple Wake Words, Custom Models | todo |
+| T090 | Wake Word Improvements - Multiple Wake Words, Custom Models | done |
 | T091 | Streaming STT Improvements - True Streaming Mode | done |
-| T092 | Speaker Identification Enhancement - pyannote.audio Integration | todo |
+| T092 | Speaker Identification Enhancement - pyannote.audio Integration | done |
 | T093 | Emotion Detection Enhancement - ML-based Classification | todo |
 | T094 | Full-Duplex Audio Support | todo |
 

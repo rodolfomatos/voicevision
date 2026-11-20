@@ -304,6 +304,7 @@ class ProviderRegistry:
             MoondreamBackend,
             OnnxVisionBackend,
             PiperBackend,
+            PyannoteSpeakerBackend,
             SimpleEmotionBackend,
             SimpleSpeakerBackend,
             WebrtcVadBackend,
@@ -392,14 +393,23 @@ class ProviderRegistry:
                 default=True,
             )
 
-        # Speaker ID
+        # Speaker ID (T092: simple feature-based fallback or pyannote embeddings)
         if config.speaker_enabled:
-            registry.register_class(
-                "speakerid",
-                "simple",
-                SimpleSpeakerBackend,
-                default=True,
-            )
+            if config.speakerid_backend == "pyannote":
+                registry.register_class(
+                    "speakerid",
+                    "pyannote",
+                    PyannoteSpeakerBackend,
+                    default=True,
+                    **config.speakerid_params,
+                )
+            else:
+                registry.register_class(
+                    "speakerid",
+                    "simple",
+                    SimpleSpeakerBackend,
+                    default=True,
+                )
 
         return registry
 

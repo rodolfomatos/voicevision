@@ -6,6 +6,7 @@ Measures latency, accuracy, and resource usage for:
 - Wake Word detection
 - STT (whisper.cpp)
 - TTS (piper)
+- Speaker ID (pyannote-compatible embeddings, T092)
 - Full pipeline (VAD → STT → LLM → TTS)
 
 Usage:
@@ -271,6 +272,88 @@ class BenchmarkRunner:
 
         return results
 
+    @staticmethod
+    def _speaker_embedder(audio: bytes, sample_rate: int) -> list[float]:
+        """Deterministic 3-band spectral embedding for the speaker benchmark."""
+        samples = np.frombuffer(audio, dtype="<i2").astype(np.float64) / 32768.0
+        if samples.size == 0:
+            return [1.0, 0.0, 0.0]
+        positions = np.arange(samples.size)
+        bands = [
+            float(np.abs(np.sum(samples * np.exp(-2j * np.pi * freq * positions / sample_rate))))
+            for freq in (220.0, 440.0, 660.0)
+        ]
+        total = sum(bands)
+        if total == 0.0:
+            return [1.0, 0.0, 0.0]
+        return [value / total for value in bands]
+
+    @staticmethod
+    def _speaker_tone(freq: float, duration_ms: int = 500, sample_rate: int = 16000) -> bytes:
+        """Generate PCM16 audio with a single dominant tone."""
+        samples = int(duration_ms * sample_rate / 1000)
+        positions = np.arange(samples)
+        values = (0.5 * np.sin(2 * np.pi * freq * positions / sample_rate) * 32767).astype("<i2")
+        return values.tobytes()
+
+    def benchmark_speaker(self) -> list[BenchmarkResult]:
+        """T092 — identification accuracy and latency, plus diarization latency.
+
+        A deterministic spectral embedder keeps this benchmark runnable in a
+        minimal install (no pyannote/torch/model download) while still
+        exercising the real matching, streaming and diarization code paths.
+        """
+        from voicevision.backends.speaker_pyannote import PyannoteSpeakerBackend
+
+        backend = PyannoteSpeakerBackend(embedder=self._speaker_embedder, threshold=0.6)
+        speakers = {"Alice": 220.0, "Bob": 440.0, "Carol": 660.0}
+        for label, freq in speakers.items():
+            backend.enroll(self._speaker_tone(freq), label=label)
+
+        results: list[BenchmarkResult] = []
+        correct = sum(
+            backend.identify(self._speaker_tone(freq)) == label
+            for label, freq in speakers.items()
+        )
+        results.append(BenchmarkResult(
+            component="speaker",
+            metric="identification_accuracy",
+            value=correct / len(speakers),
+            unit="ratio",
+            conditions={"speakers": len(speakers), "threshold": backend.threshold},
+        ))
+
+        sample = self._speaker_tone(440.0, duration_ms=1000)
+        chunks = [sample[i:i + 32000] for i in range(0, len(sample), 32000)]
+        for _ in range(self.iterations):
+            _, latency = self._time_it(backend.match, sample)
+            results.append(BenchmarkResult(
+                component="speaker",
+                metric="identification_latency",
+                value=latency * 1000,
+                unit="ms",
+                conditions={"audio_duration_s": 1.0, "path": "match"},
+            ))
+            _, latency = self._time_it(
+                lambda: list(backend.identify_stream(iter(chunks)))
+            )
+            results.append(BenchmarkResult(
+                component="speaker",
+                metric="identification_latency",
+                value=latency * 1000,
+                unit="ms",
+                conditions={"audio_duration_s": 1.0, "path": "stream"},
+            ))
+            _, latency = self._time_it(backend.diarize, sample)
+            results.append(BenchmarkResult(
+                component="speaker",
+                metric="diarization_latency",
+                value=latency * 1000,
+                unit="ms",
+                conditions={"audio_duration_s": 1.0},
+            ))
+        return results
+
     def benchmark_pipeline(self, config: PipelineConfig) -> list[BenchmarkResult]:
         """Benchmark full pipeline latency."""
         results = []
@@ -330,6 +413,9 @@ class BenchmarkRunner:
         # VAD benchmarks
         self.results.extend(self.benchmark_vad("webrtc"))
         self.results.extend(self.benchmark_vad("adaptive"))
+
+        # Speaker ID benchmarks (T092 — no model download required)
+        self.results.extend(self.benchmark_speaker())
 
         # STT benchmarks
         if "stt" in model_paths:
