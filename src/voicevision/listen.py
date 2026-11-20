@@ -262,7 +262,7 @@ def main(
 
     if use_adaptive_vad:
         from voicevision.backends.adaptive_vad import AdaptiveVadBackend
-        vad: VADProvider = AdaptiveVadBackend(  # type: ignore[assignment]
+        vad: VADProvider = AdaptiveVadBackend(
             sample_rate=sample_rate,
             frame_ms=30,
             noise_percentile=10,

@@ -12,6 +12,9 @@ from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+# Import the real CancellationToken to avoid type mismatch with implementations
+from voicevision.core.cancellation import CancellationToken
+
 # =============================================================================
 # Capability & Lifecycle Metadata
 # =============================================================================
@@ -611,9 +614,3 @@ ProviderType = (
     STTProvider | LLMProvider | TTSProvider | VADProvider |
     VisionProvider | WakeWordProvider | SpeakerIDProvider | EmotionProvider
 )
-
-
-# Forward reference for CancellationToken (defined in T074)
-class CancellationToken:
-    """Forward reference - implemented in voicevision.core.cancellation"""
-    pass

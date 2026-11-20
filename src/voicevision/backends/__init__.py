@@ -21,6 +21,7 @@ from voicevision.backends.speaker import (
 from voicevision.backends.subprocess_backend import SubprocessBackend
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.vision import MoondreamBackend
+from voicevision.backends.wakeword import FuzzyWakeWordBackend, PorcupineWakeWordBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
 from voicevision.core.protocols import EmotionResult
 
@@ -32,6 +33,8 @@ __all__ = [
     "PiperBackend",
     "WebrtcVadBackend",
     "AdaptiveVadBackend",
+    "PorcupineWakeWordBackend",
+    "FuzzyWakeWordBackend",
     "MoondreamBackend",
     "OnnxVisionBackend",
     "SimpleEmotionBackend",
