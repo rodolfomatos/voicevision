@@ -169,6 +169,60 @@ class BenchmarkRunner:
 
         return results
 
+    def benchmark_streaming(
+        self, model_path: str = "/models/whisper-base.bin"
+    ) -> list[BenchmarkResult]:
+        """T091 — compare end-to-end latency of chunked vs true streaming.
+
+        Records time-to-first-partial (the latency users actually feel) and
+        total stream duration for each latency target. When the binary does not
+        advertise native streaming, only the chunked baseline is measured —
+        that is the honest comparison, not a fabricated streaming number.
+        """
+        results: list[BenchmarkResult] = []
+        stt = WhisperCppBackend(model=model_path, language="en")
+        audio = self._generate_test_audio(3000)
+        audio_chunks = [audio[i : i + 3200] for i in range(0, len(audio), 3200)]
+        modes = ["chunked"]
+        if stt.supports_true_streaming():
+            modes.append("true_streaming")
+
+        for latency in (50, 100, 200):
+            for mode in modes:
+                for _ in range(self.iterations):
+                    start = time.perf_counter()
+                    first_partial_ms: float | None = None
+                    for index, _chunk in enumerate(
+                        stt.transcribe_stream(
+                            iter(audio_chunks),
+                            latency_target_ms=latency,
+                            use_true_streaming=(mode == "true_streaming"),
+                        )
+                    ):
+                        if index == 0:
+                            first_partial_ms = (time.perf_counter() - start) * 1000
+                    total_ms = (time.perf_counter() - start) * 1000
+                    conditions = {
+                        "model": "whisper-base",
+                        "mode": mode,
+                        "latency_target_ms": latency,
+                    }
+                    results.append(BenchmarkResult(
+                        component="stt",
+                        metric="streaming_time_to_first_partial",
+                        value=first_partial_ms if first_partial_ms is not None else total_ms,
+                        unit="ms",
+                        conditions=conditions,
+                    ))
+                    results.append(BenchmarkResult(
+                        component="stt",
+                        metric="streaming_total_latency",
+                        value=total_ms,
+                        unit="ms",
+                        conditions=conditions,
+                    ))
+        return results
+
     def benchmark_tts(self, model_path: str = "/models/voice.onnx") -> list[BenchmarkResult]:
         """Benchmark TTS latency and RTF."""
         results = []
@@ -189,7 +243,7 @@ class BenchmarkRunner:
                 value=latency * 1000,
                 unit="ms",
                 conditions={"model": "piper", "text_length": len(test_text)}
-            )
+            ))
 
             # Measure RTF (Real-Time Factor)
             # RTF = synthesis_time / audio_duration
@@ -202,7 +256,7 @@ class BenchmarkRunner:
                 value=rtf,
                 unit="ratio",
                 conditions={"model": "piper", "text_length": len(test_text)}
-            )
+            ))
 
             # Measure streaming latency
             chunks = list(tts.synthesize_stream([test_text]))
@@ -237,7 +291,7 @@ class BenchmarkRunner:
                 value=latency * 1000,
                 unit="ms",
                 conditions={"audio_duration_s": 3.0}
-            )
+            ))
 
             # Measure TTFT (Time to First Token) - would need streaming
             # TODO: Implement streaming pipeline benchmark
@@ -280,6 +334,7 @@ class BenchmarkRunner:
         # STT benchmarks
         if "stt" in model_paths:
             self.results.extend(self.benchmark_stt(model_paths["stt"]))
+            self.results.extend(self.benchmark_streaming(model_paths["stt"]))
 
         # TTS benchmarks
         if "tts" in model_paths:

@@ -31,8 +31,8 @@ import json
 import os
 import sys
 import time
-from collections.abc import Iterator
-from dataclasses import dataclass, replace
+from collections.abc import Generator, Iterator
+from dataclasses import dataclass, field, replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Final, cast
@@ -46,6 +46,7 @@ from voicevision.backends.onnx_vision import OnnxVisionBackend
 from voicevision.backends.speaker import SimpleSpeakerBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
+from voicevision.core.protocols import STTChunk
 from voicevision.errors import ConfigurationError, VoiceVisionError
 from voicevision.websocket import (
     CLOSE_INVALID_DATA,
@@ -139,6 +140,26 @@ class ServerConfig:
 
     # Speaker identification
     speaker_enabled: bool = False
+
+
+@dataclass
+class StreamSession:
+    """Per-connection state for the streaming-STT WebSocket protocol (T091)."""
+
+    audio: bytearray = field(default_factory=bytearray)
+    latency_target_ms: int = 100
+    language: str = ""
+    started: bool = False
+
+    def reset(self, language: str, latency_target_ms: int) -> None:
+        self.audio.clear()
+        self.language = language
+        self.latency_target_ms = latency_target_ms
+        self.started = True
+
+
+#: Latency targets accepted by the streaming endpoint (mirrors the STT backend).
+STREAM_LATENCY_TARGETS: Final = (50, 100, 200)
 
 
 def load_config() -> ServerConfig:
@@ -258,7 +279,15 @@ class VoiceVisionService:
             elapsed_ms = (time.monotonic() - started) * 1000.0
             return transcript, elapsed_ms
 
-        stt: WhisperCppBackend | None = self._stt.get(language)
+        stt = self._get_stt(language)
+        started = time.monotonic()
+        transcript = stt.transcribe(wav)
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        return transcript, elapsed_ms
+
+    def _get_stt(self, language: str) -> WhisperCppBackend:
+        """Return the cached whisper backend for a concrete language."""
+        stt = self._stt.get(language)
         if stt is None:
             if not self.config.stt_model:
                 raise ConfigurationError(
@@ -266,10 +295,27 @@ class VoiceVisionService:
                 )
             stt = WhisperCppBackend(model=self.config.stt_model, language=language)
             self._stt[language] = stt
-        started = time.monotonic()
-        transcript = stt.transcribe(wav)
-        elapsed_ms = (time.monotonic() - started) * 1000.0
-        return transcript, elapsed_ms
+        return stt
+
+    def stream_transcribe(
+        self,
+        audio_chunks: Generator[bytes, None, None],
+        language: str,
+        *,
+        latency_target_ms: int = 100,
+    ) -> Generator[STTChunk, None, None]:
+        """Yield partial and final transcripts from the cached STT backend.
+
+        ``"auto"`` is passed through: the backend detects the language from the
+        first 1-2 s of audio, so no extra model instantiation is needed here.
+        """
+        backend_language = "en" if language == "auto" else language
+        stt = self._get_stt(backend_language)
+        yield from stt.transcribe_stream(
+            audio_chunks,
+            language=language,
+            latency_target_ms=latency_target_ms,
+        )
 
     def describe(self, image: bytes, question: str) -> str:
         """Describe an image (or answer a question about it)."""
@@ -535,6 +581,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
         """Consume JSON frames until the peer closes or violates the protocol."""
         audio = bytearray()
         language = self._config.stt_language
+        stream = StreamSession()
         try:
             while True:
                 frame = ws.recv()
@@ -555,6 +602,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
                     frame.payload,
                     audio,
                     language,
+                    stream,
                 )
                 if not keep_open:
                     return
@@ -571,6 +619,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
         payload: bytes,
         audio: bytearray,
         language: str,
+        stream: StreamSession,
     ) -> tuple[bool, str]:
         """Handle one text frame. Returns (keep_open, current_language)."""
         try:
@@ -598,6 +647,15 @@ class _RequestHandler(BaseHTTPRequestHandler):
         if message_type == "end":
             self._ws_finish(ws, bytes(audio), language)
             audio.clear()
+            return True, language
+        if message_type == "stream_start":
+            self._ws_stream_start(ws, message, stream, language)
+            return True, stream.language or language
+        if message_type == "stream_audio":
+            requested = self._ws_stream_audio(ws, message, stream)
+            return True, requested if requested is not None else stream.language or language
+        if message_type == "stream_end":
+            self._ws_stream_end(ws, stream)
             return True, language
 
         self._ws_error(ws, f"unknown message type: {message_type!r}")
@@ -655,6 +713,124 @@ class _RequestHandler(BaseHTTPRequestHandler):
             ws.send_json({"type": "done"})
         except _BadRequest as exc:
             self._ws_error(ws, exc.message)
+        except ConfigurationError as exc:
+            self._ws_error(ws, str(exc))
+        except VoiceVisionError as exc:
+            self._ws_error(ws, str(exc))
+        except Exception as exc:  # noqa: BLE001 - report, do not kill the socket
+            self._ws_error(ws, f"internal error: {exc}")
+
+    # -- real-time streaming STT (T091) ------------------------------------
+
+    def _ws_stream_start(
+        self,
+        ws: WebSocketConnection,
+        message: dict[str, Any],
+        stream: StreamSession,
+        language: str,
+    ) -> None:
+        """Reset per-stream state and acknowledge the requested latency."""
+        latency = message.get("latency_target_ms", 100)
+        if not isinstance(latency, int) or isinstance(latency, bool):
+            latency = 100
+        if latency not in STREAM_LATENCY_TARGETS:
+            self._ws_error(
+                ws,
+                f"latency_target_ms must be one of {STREAM_LATENCY_TARGETS}",
+            )
+            return
+
+        requested = message.get("language")
+        if isinstance(requested, str) and requested.strip():
+            effective = requested.strip()
+        else:
+            effective = language
+        stream.reset(effective, latency)
+        ws.send_json(
+            {"type": "stream_started", "latency_target_ms": latency, "language": effective}
+        )
+
+    def _ws_stream_audio(
+        self,
+        ws: WebSocketConnection,
+        message: dict[str, Any],
+        stream: StreamSession,
+    ) -> str | None:
+        """Append one base64 audio chunk to the active stream."""
+        if not stream.started:
+            self._ws_error(ws, "stream_start must be sent before stream_audio")
+            return None
+        try:
+            chunk = _decode_base64(message, "audio_base64")
+        except _BadRequest as exc:
+            self._ws_error(ws, exc.message)
+            return None
+        if len(stream.audio) + len(chunk) > self._config.max_body_bytes:
+            stream.audio.clear()
+            self._ws_error(
+                ws,
+                f"buffered audio exceeds {self._config.max_body_bytes} bytes",
+            )
+            return None
+        stream.audio.extend(chunk)
+        requested = message.get("language")
+        if isinstance(requested, str) and requested.strip():
+            stream.language = requested.strip()
+            return stream.language
+        return None
+
+    def _ws_stream_end(self, ws: WebSocketConnection, stream: StreamSession) -> None:
+        """Transcribe the buffered audio, emitting partial/final messages."""
+        if not stream.started:
+            self._ws_error(ws, "stream_start must be sent before stream_end")
+            return
+        if not stream.audio:
+            self._ws_error(ws, "no audio received for streaming")
+            return
+        audio = bytes(stream.audio)
+        stream.audio.clear()
+        self._ws_stream_transcribe(
+            ws,
+            audio,
+            stream.language,
+            latency_target_ms=stream.latency_target_ms,
+        )
+        stream.started = False
+
+    def _ws_stream_transcribe(
+        self,
+        ws: WebSocketConnection,
+        audio: bytes,
+        language: str,
+        *,
+        latency_target_ms: int = 100,
+    ) -> None:
+        """Feed audio slices to the STT backend and forward its STTChunks."""
+        # At 16 kHz mono PCM16 one millisecond is 32 bytes. Slicing the buffer
+        # lets the backend emit partials while playback is still in progress.
+        slice_bytes = max(latency_target_ms * 32, 1)
+
+        def audio_chunks() -> Generator[bytes, None, None]:
+            for start in range(0, len(audio), slice_bytes):
+                yield audio[start : start + slice_bytes]
+
+        try:
+            for chunk in self._app.stream_transcribe(
+                audio_chunks(),
+                language,
+                latency_target_ms=latency_target_ms,
+            ):
+                ws.send_json(
+                    {
+                        "type": "transcript_partial" if not chunk.is_final else "transcript_final",
+                        "text": chunk.text,
+                        "language": chunk.language,
+                        "is_final": chunk.is_final,
+                        "start_ms": chunk.start_ms,
+                        "end_ms": chunk.end_ms,
+                    }
+                )
+            ws.send_json({"type": "stream_done"})
         except ConfigurationError as exc:
             self._ws_error(ws, str(exc))
         except VoiceVisionError as exc:

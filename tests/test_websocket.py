@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from voicevision.core.protocols import STTChunk
 from voicevision.errors import BackendExecutionError, ConfigurationError
 from voicevision.server import ServerConfig, VoiceVisionService, create_server
 from voicevision.websocket import (
@@ -215,12 +216,27 @@ class FakeStreamingService:
         self.closed = False
         self.transcribe_error: Exception | None = None
         self.stream_error: Exception | None = None
+        self.stream_calls: list[tuple[bytes, str, int]] = []
 
     def transcribe(self, wav: bytes, language: str) -> tuple[str, float]:
         if self.transcribe_error is not None:
             raise self.transcribe_error
         self.transcribed.append((wav, language))
         return "hello world", 7.5
+
+    def stream_transcribe(
+        self,
+        audio_chunks: Iterator[bytes],
+        language: str,
+        *,
+        latency_target_ms: int = 100,
+    ) -> Iterator[STTChunk]:
+        """Fake real-time STT: two partials, one final, echoing the audio."""
+        audio = b"".join(audio_chunks)
+        self.stream_calls.append((audio, language, latency_target_ms))
+        yield STTChunk("hello", is_final=False, language=language, start_ms=0, end_ms=500)
+        yield STTChunk("hello world", is_final=False, language=language, start_ms=0, end_ms=1000)
+        yield STTChunk("hello world", is_final=True, language=language)
 
     def converse_stream(self, text: str, max_tokens: int) -> Iterator[str]:
         if self.stream_error is not None:
@@ -657,6 +673,123 @@ class TestStreaming:
             client.send_text({"type": "end"})
             assert client.recv_json()["type"] == "transcript"
             assert "internal error: kaboom" in client.recv_json()["error"]
+        finally:
+            client.close()
+
+
+class TestStreamingSTT:
+    """T091 — real-time STT over the same WebSocket endpoint."""
+
+    def _client(self, server: Any) -> WSClient:
+        sock, response = _handshake(server)
+        assert _status(response) == 101
+        return WSClient(sock)
+
+    def test_stream_start_audio_end_emits_partials_and_final(
+        self,
+        live: tuple[Any, FakeStreamingService],
+    ) -> None:
+        server, service = live
+        client = self._client(server)
+        try:
+            client.send_text({"type": "stream_start", "latency_target_ms": 50, "language": "pt"})
+            assert client.recv_json() == {
+                "type": "stream_started",
+                "latency_target_ms": 50,
+                "language": "pt",
+            }
+            client.send_text({"type": "stream_audio", "audio_base64": _b64(b"\x00\x01" * 100)})
+            client.send_text({"type": "stream_audio", "audio_base64": _b64(b"\x00\x02" * 100)})
+            client.send_text({"type": "stream_end"})
+
+            first = client.recv_json()
+            assert first["type"] == "transcript_partial"
+            assert first["text"] == "hello"
+            assert first["start_ms"] == 0 and first["end_ms"] == 500
+
+            second = client.recv_json()
+            assert second["type"] == "transcript_partial"
+            assert second["text"] == "hello world"
+
+            final = client.recv_json()
+            assert final["type"] == "transcript_final"
+            assert final["is_final"] is True
+            assert client.recv_json() == {"type": "stream_done"}
+
+            audio, language, latency = service.stream_calls[0]
+            assert audio == b"\x00\x01" * 100 + b"\x00\x02" * 100
+            assert language == "pt"
+            assert latency == 50
+        finally:
+            client.close()
+
+    def test_stream_start_validates_latency(
+        self,
+        live: tuple[Any, FakeStreamingService],
+    ) -> None:
+        server, _service = live
+        client = self._client(server)
+        try:
+            client.send_text({"type": "stream_start", "latency_target_ms": 37})
+            error = client.recv_json()
+            assert error["type"] == "error"
+            assert "50, 100, 200" in error["error"]
+            # The stream was not started; audio must be refused.
+            client.send_text({"type": "stream_audio", "audio_base64": _b64(b"\x00\x01")})
+            assert "stream_start" in client.recv_json()["error"]
+        finally:
+            client.close()
+
+    def test_stream_audio_before_start_is_rejected(
+        self,
+        live: tuple[Any, FakeStreamingService],
+    ) -> None:
+        server, _service = live
+        client = self._client(server)
+        try:
+            client.send_text({"type": "stream_audio", "audio_base64": _b64(b"\x00\x01")})
+            assert "stream_start" in client.recv_json()["error"]
+        finally:
+            client.close()
+
+    def test_stream_end_without_audio_is_rejected(
+        self,
+        live: tuple[Any, FakeStreamingService],
+    ) -> None:
+        server, _service = live
+        client = self._client(server)
+        try:
+            client.send_text({"type": "stream_start"})
+            client.recv_json()
+            client.send_text({"type": "stream_end"})
+            assert "no audio" in client.recv_json()["error"]
+        finally:
+            client.close()
+
+    def test_stream_audio_language_override_is_forwarded(
+        self,
+        live: tuple[Any, FakeStreamingService],
+    ) -> None:
+        server, service = live
+        client = self._client(server)
+        try:
+            client.send_text({"type": "stream_start"})
+            client.recv_json()
+            client.send_text(
+                {
+                    "type": "stream_audio",
+                    "audio_base64": _b64(b"\x00\x01" * 10),
+                    "language": "es",
+                }
+            )
+            client.send_text({"type": "stream_end"})
+            assert [msg["type"] for msg in (client.recv_json() for _ in range(4))] == [
+                "transcript_partial",
+                "transcript_partial",
+                "transcript_final",
+                "stream_done",
+            ]
+            assert service.stream_calls[0][1] == "es"
         finally:
             client.close()
 
