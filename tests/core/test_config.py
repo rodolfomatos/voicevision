@@ -27,6 +27,8 @@ class TestConfig:
         assert config.camera_index == 0
         assert config.camera_resolution == "640x480"
         assert config.camera_resolution_parsed == (640, 480)
+        assert config.duplex_enabled is False  # T094
+        assert config.duplex_params == {}
 
     def test_env_var_override(self, monkeypatch) -> None:
         monkeypatch.setenv("VOICEVISION_LLM_BACKEND", "ollama")
@@ -40,6 +42,20 @@ class TestConfig:
         monkeypatch.setenv("VOICEVISION_LLM_PARAMS__MAX_TOKENS", "100")
         config = VoiceVisionConfig()
         assert config.llm_params == {"temperature": "0.7", "max_tokens": "100"}
+
+    def test_duplex_env_config(self, monkeypatch) -> None:
+        """T094 — duplex options load from environment."""
+        monkeypatch.setenv("VOICEVISION_DUPLEX_ENABLED", "1")
+        monkeypatch.setenv("VOICEVISION_DUPLEX_PARAMS__AEC_STRENGTH", "0.8")
+        config = VoiceVisionConfig()
+        assert config.duplex_enabled is True
+        assert config.duplex_params["aec_strength"] == "0.8"
+
+        from voicevision.core.config import create_pipeline_config_from_env
+
+        pipeline_config = create_pipeline_config_from_env()
+        assert pipeline_config.duplex_enabled is True
+        assert dict(pipeline_config.duplex_params) == {"aec_strength": "0.8"}
 
     def test_camera_resolution_string(self, monkeypatch) -> None:
         monkeypatch.setenv("VOICEVISION_CAMERA_RESOLUTION", "1280x720")

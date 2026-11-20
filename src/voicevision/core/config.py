@@ -106,6 +106,12 @@ class VoiceVisionConfig(BaseSettings):
     emotion_backend: str = Field(default="simple", description="Emotion backend name")
     emotion_params: dict[str, Any] = Field(default_factory=dict)
 
+    # Full-duplex audio (T094)
+    duplex_enabled: bool = Field(
+        default=False, description="Enable simultaneous capture and playback"
+    )
+    duplex_params: dict[str, Any] = Field(default_factory=dict)
+
     @property
     def camera_resolution_parsed(self) -> tuple[int, int]:
         """Get camera resolution as parsed tuple."""
@@ -217,6 +223,10 @@ class PipelineConfig:
     speaker_enabled: bool = False
     speakerid_backend: str = "simple"
     speakerid_params: dict[str, Any] = field(default_factory=dict)
+
+    # Full-duplex audio (T094)
+    duplex_enabled: bool = False
+    duplex_params: dict[str, Any] = field(default_factory=dict)
 
     # Provider registry (populated from VoiceVisionConfig)
     _provider_registry: ProviderRegistry | None = field(default=None, repr=False)
@@ -396,4 +406,7 @@ def create_pipeline_config_from_env() -> PipelineConfig:
         speaker_enabled=env_config.speakerid_backend != "dummy",
         speakerid_backend=env_config.speakerid_backend,
         speakerid_params=dict(env_config.speakerid_params),
+        # Full-duplex audio
+        duplex_enabled=env_config.duplex_enabled,
+        duplex_params=dict(env_config.duplex_params),
     )

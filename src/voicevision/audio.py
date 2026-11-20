@@ -110,3 +110,14 @@ def pcm16_to_wav(
         wav.setframerate(sample_rate)
         wav.writeframes(pcm)
     return buffer.getvalue()
+
+
+def wav_to_pcm16(data: bytes) -> bytes:
+    """Extract raw PCM16 samples from a WAV container (T094 duplex playback)."""
+    try:
+        with wave.open(io.BytesIO(data), "rb") as wav:
+            if wav.getsampwidth() != 2:
+                raise AudioFormatError("playback WAV must be 16-bit PCM")
+            return wav.readframes(wav.getnframes())
+    except (wave.Error, EOFError) as exc:
+        raise AudioFormatError(f"not a readable WAV file: {exc}") from exc

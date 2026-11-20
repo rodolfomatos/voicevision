@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
+from voicevision.audio import wav_to_pcm16
+from voicevision.backends.audio_duplex import DuplexAudioSession, DuplexConfig
 from voicevision.backends.emotion import SimpleEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
 from voicevision.backends.onnx_vision import OnnxVisionBackend
@@ -22,6 +24,7 @@ from voicevision.backends.speaker import SimpleSpeakerBackend
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
+from voicevision.core.cancellation import CancellationToken
 from voicevision.core.protocols import EmotionResult
 from voicevision.text import extract_sentences
 
@@ -81,6 +84,13 @@ class PipelineConfig:
 
     # Speaker identification
     speaker_enabled: bool = False
+
+    # Full-duplex audio (T094)
+    duplex_enabled: bool = False
+    duplex_echo_cancellation_strength: float = 0.5
+    duplex_noise_suppression_enabled: bool = True
+    duplex_agc_enabled: bool = True
+    duplex_barge_in_threshold_db: float = 12.0
 
 
 class VoicePipeline:
@@ -302,6 +312,63 @@ class VoicePipeline:
 
         # Concatenate all speech chunks
         return b"".join(output_chunks)
+
+    # -- full-duplex audio (T094) -------------------------------------------
+
+    def create_duplex_config(self) -> DuplexConfig:
+        """Build a :class:`DuplexConfig` from this pipeline's settings."""
+        return DuplexConfig(
+            sample_rate=self.config.vad_sample_rate,
+            aec_strength=self.config.duplex_echo_cancellation_strength,
+            noise_suppression_enabled=self.config.duplex_noise_suppression_enabled,
+            agc_enabled=self.config.duplex_agc_enabled,
+            barge_in_threshold_db=self.config.duplex_barge_in_threshold_db,
+        )
+
+    def create_duplex_session(
+        self,
+        *,
+        token: CancellationToken | None = None,
+        stream_factory: Any | None = None,
+    ) -> DuplexAudioSession:
+        """Create a duplex audio session wired to this pipeline's config."""
+        return DuplexAudioSession(
+            config=self.create_duplex_config(),
+            token=token or CancellationToken(),
+            stream_factory=stream_factory,
+        )
+
+    def process_duplex_turn(self, session: DuplexAudioSession, captured_pcm: bytes) -> str:
+        """Run one duplex turn: transcribe → respond → queue TTS for playback.
+
+        Barge-in cancels ``session.token``, so the checks between stages abort
+        an in-flight response as soon as the user starts speaking. Returns the
+        response text (empty when there was nothing to say).
+        """
+        token = session.token
+        token.throw_if_cancelled()
+
+        transcript = self.stt.transcribe(captured_pcm)
+        token.throw_if_cancelled()
+        if not transcript.strip():
+            return ""
+
+        context = self._build_conversation_context()
+        prompt = f"{context}User: {transcript}\nAssistant:" if context else transcript
+        response_text = self.llm.complete(prompt).content
+        token.throw_if_cancelled()
+
+        if self.config.enable_thinking_filter:
+            response_text = self._filter_thinking(response_text)
+        if not response_text.strip():
+            return ""
+
+        self._conversation_history.append((transcript, response_text))
+        if not self.config.mute_tts:
+            wav = self.tts.synthesize(response_text)
+            token.throw_if_cancelled()
+            session.play(wav_to_pcm16(wav))
+        return response_text
 
     def detect_emotion(self, transcript: str) -> EmotionResult | None:
         """Detect emotion from a transcript if emotion is enabled.

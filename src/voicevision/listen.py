@@ -5,12 +5,15 @@ Provides voicevision-listen command for push-to-talk or continuous dictation.
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from voicevision.backends.audio_duplex import DuplexAudioSession, DuplexConfig
 from voicevision.backends.vad import WebrtcVadBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
 from voicevision.core.cancellation import CancellationToken
@@ -79,10 +82,17 @@ class ListenSession:
         stt_language: str = "en",
         cancellation_token: CancellationToken | None = None,
         speaker: SpeakerIDProvider | None = None,
+        duplex_config: DuplexConfig | None = None,
+        duplex_stream_factory: Callable[..., Any] | None = None,
+        on_barge_in: Callable[[], None] | None = None,
     ) -> None:
         self._vad = vad
         self._stt = stt
         self._speaker = speaker
+        self._duplex_config = duplex_config
+        self._duplex_stream_factory = duplex_stream_factory
+        self._on_barge_in = on_barge_in
+        self._duplex_session: DuplexAudioSession | None = None
         self._sample_rate = sample_rate
         self._frame_ms = frame_ms
         self._pre_roll_ms = pre_roll_ms
@@ -111,6 +121,16 @@ class ListenSession:
         """Start the listening session."""
         if self._running:
             return
+        if self._duplex_config is not None:
+            self._duplex_session = DuplexAudioSession(
+                config=self._duplex_config,
+                stream_factory=self._duplex_stream_factory,
+            )
+            if self._on_barge_in is not None:
+                self._duplex_session.detector.on_barge_in(  # type: ignore[union-attr]
+                    self._on_barge_in
+                )
+            self._duplex_session.start()
         self._running = True
         self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._process_thread = threading.Thread(target=self._process_loop, daemon=True)
@@ -121,10 +141,29 @@ class ListenSession:
         """Stop the listening session."""
         self._running = False
         self._cancellation_token.cancel()
+        if self._duplex_session is not None:
+            self._duplex_session.stop()
         if self._capture_thread:
             self._capture_thread.join(timeout=1.0)
         if self._process_thread:
             self._process_thread.join(timeout=1.0)
+
+    def play(self, pcm: bytes) -> None:
+        """Queue PCM16 playback so the duplex AEC gets a reference and barge-in is armed.
+
+        Raises:
+            RuntimeError: if the session was not started in duplex mode.
+        """
+        if self._duplex_session is None:
+            raise RuntimeError("playback requires duplex mode")
+        self._duplex_session.play(pcm)
+
+    @property
+    def barge_in_latency_ms(self) -> float | None:
+        """Measured barge-in detection latency, if duplex mode is active."""
+        if self._duplex_session is None or self._duplex_session.detector is None:
+            return None
+        return self._duplex_session.detector.detection_latency_ms
 
     def __enter__(self) -> ListenSession:
         self.start()
@@ -134,7 +173,16 @@ class ListenSession:
         self.stop()
 
     def _capture_loop(self) -> None:
-        """Capture audio from microphone."""
+        """Capture audio from the microphone (duplex or input-only)."""
+        if self._duplex_session is not None:
+            for frame in self._duplex_session.captured_frames():
+                if not self._running:
+                    break
+                self._audio_queue.put(
+                    AudioChunk(data=frame, timestamp=time.time())
+                )
+            return
+
         try:
             import sounddevice as sd
         except ImportError as err:
@@ -264,6 +312,11 @@ def main(
     speaker_backend: str = "",
     speaker_db_path: str = "",
     speaker_threshold: float = 0.7,
+    duplex_enabled: bool | None = None,
+    duplex_echo_cancellation_strength: float = 0.5,
+    duplex_noise_suppression_enabled: bool = True,
+    duplex_agc_enabled: bool = True,
+    duplex_barge_in_threshold_db: float = 12.0,
 ) -> None:
     """Main entry point for voicevision-listen."""
     if not stt_model:
@@ -300,6 +353,21 @@ def main(
         )
         speaker.initialize()
 
+    # T094: optional full-duplex capture with AEC/NS/AGC and barge-in.
+    if duplex_enabled is None:
+        duplex_enabled = os.environ.get("VOICEVISION_DUPLEX", "0") == "1"
+    duplex_config = (
+        DuplexConfig(
+            sample_rate=sample_rate,
+            aec_strength=duplex_echo_cancellation_strength,
+            noise_suppression_enabled=duplex_noise_suppression_enabled,
+            agc_enabled=duplex_agc_enabled,
+            barge_in_threshold_db=duplex_barge_in_threshold_db,
+        )
+        if duplex_enabled
+        else None
+    )
+
     print("Listening... Press Ctrl+C to stop")
     with ListenSession(
         vad=vad,
@@ -310,6 +378,7 @@ def main(
         vad_max_utterance_ms=vad_max_utterance_ms,
         stt_language=stt_language,
         speaker=speaker,
+        duplex_config=duplex_config,
     ):
         try:
             while True:

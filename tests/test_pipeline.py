@@ -584,3 +584,75 @@ class TestConversationMemory:
         second_call_arg = call_args[1][0][0]
         assert "hello again" in second_call_arg
         assert "hello" not in second_call_arg.replace("hello again", "")
+
+
+class TestDuplexPipeline:
+    """T094 — duplex config/session wiring and barge-in-aware turns."""
+
+    def test_create_duplex_config_maps_pipeline_settings(self) -> None:
+        config = PipelineConfig(
+            vad_sample_rate=16000,
+            duplex_echo_cancellation_strength=0.8,
+            duplex_noise_suppression_enabled=False,
+            duplex_agc_enabled=False,
+            duplex_barge_in_threshold_db=20.0,
+        )
+        pipeline = VoicePipeline(config)
+        duplex = pipeline.create_duplex_config()
+        assert duplex.sample_rate == 16000
+        assert duplex.aec_strength == 0.8
+        assert duplex.noise_suppression_enabled is False
+        assert duplex.agc_enabled is False
+        assert duplex.barge_in_threshold_db == 20.0
+
+    def test_create_duplex_session_uses_config(self) -> None:
+        pipeline = VoicePipeline(
+            PipelineConfig(duplex_echo_cancellation_strength=0.9)
+        )
+        session = pipeline.create_duplex_session()
+        assert session.config.aec_strength == 0.9
+        assert session.token is not None
+
+    def test_process_duplex_turn_queues_playback(self, mock_backends) -> None:
+        from voicevision.audio import pcm16_to_wav
+
+        config = PipelineConfig(
+            stt_model="/models/whisper.bin",
+            llm_model="/models/llama.gguf",
+            tts_model="/models/piper.onnx",
+            enable_thinking_filter=False,
+        )
+        pipeline = VoicePipeline(config)
+        mocks = mock_backends
+        mocks["stt_instance"].transcribe.return_value = "hello"
+        mocks["llm_instance"].complete.return_value.content = "hi there"
+        mocks["tts_instance"].synthesize.return_value = pcm16_to_wav(b"\x00\x00" * 100)
+
+        session = pipeline.create_duplex_session()
+        response = pipeline.process_duplex_turn(session, b"\x00\x00" * 160)
+        assert response == "hi there"
+        assert session.captured_now() == []
+        # Playback PCM was queued (WAV header stripped).
+        with session._lock:
+            assert len(session._playback) == 200
+
+    def test_process_duplex_turn_empty_transcript(self, mock_backends) -> None:
+        pipeline = VoicePipeline(
+            PipelineConfig(stt_model="/models/whisper.bin")
+        )
+        mock_backends["stt_instance"].transcribe.return_value = ""
+        session = pipeline.create_duplex_session()
+        assert pipeline.process_duplex_turn(session, b"\x00\x00" * 160) == ""
+        mock_backends["llm_instance"].complete.assert_not_called()
+
+    def test_process_duplex_turn_aborts_on_barge_in(self, mock_backends) -> None:
+        from voicevision.errors import PipelineCancelledError
+
+        pipeline = VoicePipeline(PipelineConfig(stt_model="/models/whisper.bin"))
+        mocks = mock_backends
+        mocks["stt_instance"].transcribe.return_value = "hello"
+        session = pipeline.create_duplex_session()
+        session.token.cancel()
+        with pytest.raises(PipelineCancelledError):
+            pipeline.process_duplex_turn(session, b"\x00\x00" * 160)
+        mocks["stt_instance"].transcribe.assert_not_called()

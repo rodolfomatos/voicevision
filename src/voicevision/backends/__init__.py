@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 from voicevision.backends.adaptive_vad import AdaptiveVadBackend
+from voicevision.backends.audio_duplex import (
+    AudioProcessor,
+    BargeInDetector,
+    DuplexAudioSession,
+    DuplexConfig,
+    EchoCanceller,
+)
 from voicevision.backends.emotion import (
     SimpleEmotionBackend,
     detect_emotion,
@@ -39,6 +46,11 @@ __all__ = [
     "PiperBackend",
     "WebrtcVadBackend",
     "AdaptiveVadBackend",
+    "DuplexAudioSession",
+    "DuplexConfig",
+    "AudioProcessor",
+    "EchoCanceller",
+    "BargeInDetector",
     "PorcupineWakeWordBackend",
     "FuzzyWakeWordBackend",
     "MoondreamBackend",

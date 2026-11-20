@@ -8,6 +8,7 @@ Measures latency, accuracy, and resource usage for:
 - TTS (piper)
 - Speaker ID (pyannote-compatible embeddings, T092)
 - Emotion detection (ML vs keyword accuracy, text/audio latency, T093)
+- Full-duplex audio (echo return loss enhancement, barge-in latency, T094)
 - Full pipeline (VAD → STT → LLM → TTS)
 
 Usage:
@@ -443,6 +444,72 @@ class BenchmarkRunner:
             ))
         return results
 
+    @staticmethod
+    def _duplex_to_pcm(samples: np.ndarray) -> bytes:
+        return bytes((np.clip(samples, -1.0, 1.0) * 32768).astype("<i2").tobytes())
+
+    @staticmethod
+    def _duplex_to_float(data: bytes) -> np.ndarray:
+        return np.frombuffer(data, dtype="<i2").astype(np.float64) / 32768.0
+
+    def benchmark_duplex(self) -> list[BenchmarkResult]:
+        """T094 — echo return loss enhancement (ERLE) and barge-in latency.
+
+        Synthetic causal echo and near-end speech exercise the real numpy DSP;
+        no microphone or sounddevice is required. ERLE is reported for several
+        cancellation strengths so the configurability is measurable.
+        """
+        from voicevision.backends.audio_duplex import (
+            BargeInDetector,
+            EchoCanceller,
+            DuplexConfig,
+        )
+
+        results: list[BenchmarkResult] = []
+        rng = np.random.default_rng(42)
+        reference = rng.uniform(-0.5, 0.5, size=16000)
+        echo_path = np.array([0.6, -0.3, 0.15, -0.08, 0.04, -0.02])
+        echo = np.zeros_like(reference)
+        for delay, coefficient in enumerate(echo_path):
+            echo[delay:] += coefficient * reference[: len(reference) - delay]
+        positions = np.arange(len(reference))
+        near_end = 0.01 * np.sin(2 * np.pi * 220 * positions / 16000)
+        mic = echo + near_end
+
+        for strength in (0.25, 0.5, 0.75):
+            canceller = EchoCanceller(strength=strength, filter_length=32, echo_suppression=0.0)
+            output = np.concatenate([
+                self._duplex_to_float(canceller.process(
+                    self._duplex_to_pcm(mic[i : i + 160]),
+                    self._duplex_to_pcm(reference[i : i + 160]),
+                ))
+                for i in range(0, len(mic), 160)
+            ])
+            erle = 10 * np.log10(np.sum(mic**2) / np.sum(output**2))
+            results.append(BenchmarkResult(
+                component="duplex",
+                metric="echo_return_loss_enhancement",
+                value=float(erle),
+                unit="dB",
+                conditions={"aec_strength": strength, "duration_s": 1.0},
+            ))
+
+        # Barge-in: one 10 ms speech frame per trial, with frame timing marked.
+        speech = self._duplex_to_pcm(0.7 * np.ones(160))
+        detector = BargeInDetector(config=DuplexConfig(barge_in_threshold_db=12.0))
+        for _ in range(self.iterations):
+            detector.set_playback(True)
+            detector.begin_frame()
+            _, latency = self._time_it(detector.process, speech)
+            results.append(BenchmarkResult(
+                component="duplex",
+                metric="barge_in_latency",
+                value=latency * 1000,
+                unit="ms",
+                conditions={"frame_ms": 10, "threshold_db": 12.0},
+            ))
+        return results
+
     def benchmark_pipeline(self, config: PipelineConfig) -> list[BenchmarkResult]:
         """Benchmark full pipeline latency."""
         results = []
@@ -508,6 +575,9 @@ class BenchmarkRunner:
 
         # Emotion benchmarks (T093 — no model download required)
         self.results.extend(self.benchmark_emotion())
+
+        # Full-duplex benchmarks (T094 — no microphone required)
+        self.results.extend(self.benchmark_duplex())
 
         # STT benchmarks
         if "stt" in model_paths:

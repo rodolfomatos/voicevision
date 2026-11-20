@@ -16,7 +16,7 @@ status: active
 | T091 | Streaming STT Improvements - True Streaming Mode | done |
 | T092 | Speaker Identification Enhancement - pyannote.audio Integration | done |
 | T093 | Emotion Detection Enhancement - ML-based Classification | done |
-| T094 | Full-Duplex Audio Support | todo |
+| T094 | Full-Duplex Audio Support | done |
 
 ## Retrospective
 
