@@ -1,6 +1,6 @@
 ---
 project: voicevision
 created: 2025-10-08
-current_sprint: sprint-m2
-current_ticket: T089
+current_sprint: sprint-m3
+current_ticket: T090
 ---
