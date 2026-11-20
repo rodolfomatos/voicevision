@@ -5,7 +5,7 @@ transcript, and exits. That matches SubprocessBackend's semantics exactly — se
 that module's docstring for why it spawns per call rather than keeping a child
 warm.
 
-Implements STTProvider protocol (M1).
+Implements STTProvider protocol (M1) with streaming support via chunked processing.
 """
 
 from __future__ import annotations
@@ -17,8 +17,13 @@ from typing import ClassVar, Final
 
 from voicevision.audio import require_whisper_format
 from voicevision.backends.subprocess_backend import SubprocessBackend
-from voicevision.core.protocols import ProviderCapabilities, ProviderLifecycle, STTChunk
+from voicevision.core.protocols import (
+    ProviderCapabilities,
+    ProviderLifecycle,
+    STTChunk,
+)
 from voicevision.errors import ProviderRuntimeError
+from voicevision.text import extract_sentences
 
 #: whisper.cpp prefixes each segment with `[00:00:00.000 --> 00:00:02.000]`.
 #: `-nt` suppresses these, but forks differ, so strip defensively rather than
@@ -35,7 +40,7 @@ _FILE_WRITTEN = re.compile(r"^\s*.*\.txt\s*$", re.MULTILINE)
 class WhisperCppBackend(SubprocessBackend):
     """Transcribe 16 kHz mono PCM16 WAV using whisper.cpp.
 
-    Implements STTProvider protocol.
+    Implements STTProvider protocol with streaming support via chunked processing.
     The model path is supplied by the caller; this class never downloads
     anything.
     """
@@ -105,7 +110,7 @@ class WhisperCppBackend(SubprocessBackend):
         candidates = (cls.executable, *cls.alternate_executables)
         return any(shutil.which(c) for c in candidates)
 
-    # install_hint is a class attribute (line 43). The protocol expects a classmethod,
+    # install_hint is a class attribute. The protocol expects a classmethod,
     # but @runtime_checkable only validates instance methods. Class attribute works.
 
     # -- STTProvider protocol --------------------------------------------------
@@ -124,7 +129,7 @@ class WhisperCppBackend(SubprocessBackend):
             audio: 16 kHz mono PCM16 WAV bytes.
             language: Language code (e.g., 'en', 'pt') or "auto" for detection.
                 If None, uses the language from constructor.
-            token: Optional cancellation token (checked before spawn).
+            token: Optional cancellation token.
             **kwargs: Ignored; per-call overrides belong on constructor.
 
         Returns:
@@ -162,6 +167,77 @@ class WhisperCppBackend(SubprocessBackend):
             raw = self.run(audio).decode("utf-8", errors="replace")
         return self.parse_transcript(raw)
 
+    def _extract_chunk_params(
+        self, kwargs: dict[str, object]
+    ) -> tuple[int, int, int, int]:
+        """Extract chunk parameters and convert to bytes."""
+        chunk_size_ms_raw: int = kwargs.get("chunk_size_ms", 1500)  # type: ignore[assignment]
+        overlap_ms_raw: int = kwargs.get("overlap_ms", 500)  # type: ignore[assignment]
+        chunk_size_ms = int(chunk_size_ms_raw)
+        overlap_ms = int(overlap_ms_raw)
+
+        if chunk_size_ms <= overlap_ms:
+            raise ValueError("chunk_size_ms must be greater than overlap_ms")
+
+        # Convert ms to bytes (16kHz, 16-bit mono)
+        samples_per_ms = self._sample_rate // 1000
+        bytes_per_ms = samples_per_ms * 2  # 16-bit = 2 bytes
+        chunk_bytes = chunk_size_ms * (samples_per_ms * 2)
+        overlap_bytes = overlap_ms * bytes_per_ms
+        return chunk_size_ms, overlap_ms, chunk_bytes, overlap_bytes
+
+    def _transcribe_chunk(
+        self,
+        buf: bytes,
+        lang: str | None,
+        token: CancellationToken | None,
+    ) -> tuple[str, str | None]:
+        """Transcribe a single chunk and return (transcript, detected_language)."""
+        if not buf:
+            return "", None
+
+        detected_lang = None
+        lang = lang
+        if lang is None:
+            detected_lang = self.detect_language(buf)
+            lang = detected_lang
+
+        transcript = self.transcribe(buf, language=lang)
+        return transcript, detected_lang
+
+    def _process_transcript_chunk(
+        self,
+        transcript: str,
+        accumulated_text: str,
+        language: str | None,
+        detected_language: str | None,
+    ) -> tuple[str, list[STTChunk]]:
+        """Process transcript chunk and return complete sentences as partial results."""
+        combined = accumulated_text + transcript
+        sentences = extract_sentences(combined)
+
+        chunks: list[STTChunk] = []
+        new_accumulated = accumulated_text
+
+        # Emit complete sentences as partial results
+        for sentence in sentences[:-1]:  # All but last (might be incomplete)
+            if sentence != accumulated_text:
+                chunks.append(
+                    STTChunk(
+                        text=sentence,
+                        is_final=False,
+                        language=language,
+                        start_ms=None,
+                        end_ms=None,
+                    )
+                )
+                accumulated_text = sentence
+
+        # Keep incomplete last sentence for next iteration
+        new_accumulated = sentences[-1] if sentences else ""
+
+        return new_accumulated, chunks
+
     def transcribe_stream(
         self,
         audio_chunks: Generator[bytes, None, None],
@@ -170,25 +246,87 @@ class WhisperCppBackend(SubprocessBackend):
         token: CancellationToken | None = None,
         **kwargs: object,
     ) -> Generator[STTChunk, None, None]:
-        """Stream transcription — not supported by whisper.cpp one-shot.
+        """Stream transcription via chunked processing with partial results.
 
-        whisper.cpp is a one-shot CLI. This method buffers all chunks and
-        returns a single final chunk for compatibility.
+        whisper.cpp is a one-shot CLI, so we implement streaming by:
+        1. Buffering incoming audio chunks
+        2. When enough audio accumulates (chunk_size_ms), transcribe it
+        3. Use sentence boundary detection to emit partial results
+        4. Yield partial results with is_final=False, final with is_final=True
+
+        Args:
+            audio_chunks: Generator yielding audio chunks (PCM16 WAV bytes).
+            language: Language code (e.g., 'en', 'pt') or 'auto' for detection.
+                If None, uses the language from constructor.
+            token: Optional cancellation token.
+            **kwargs: Additional options:
+                - chunk_size_ms: Audio chunk size in ms (default: 1500)
+                - overlap_ms: Overlap between chunks in ms (default: 500)
+
+        Yields:
+            STTChunk with partial/final transcripts.
         """
-        # Buffer all chunks
+        chunk_size_ms, overlap_ms, chunk_bytes, overlap_bytes = self._extract_chunk_params({})
+
+        # Language detection state
+        detected_language: str | None = None
+        if language == "auto":
+            language = None  # Will be detected on first chunk
+
+        # Buffer for accumulating audio
         audio_buffer = bytearray()
+        accumulated_text = ""
+
         for chunk in audio_chunks:
             if token is not None:
                 token.throw_if_cancelled()
             audio_buffer.extend(chunk)
 
-        if not audio_buffer:
-            return
-            yield  # Make this a generator
+            # Process when we have enough audio
+            while len(audio_buffer) >= chunk_bytes:
+                # Extract chunk with overlap
+                process_chunk = bytes(audio_buffer[:chunk_bytes])
+                # Keep overlap for next iteration
+                audio_buffer = audio_buffer[chunk_bytes - overlap_bytes:]
 
-        # Transcribe buffered audio
-        transcript = self.transcribe(bytes(audio_buffer), language=language, token=token)
-        yield STTChunk(text=transcript, is_final=True, language=language)
+                # Transcribe this chunk
+                transcript, detected_lang = self._transcribe_chunk(
+                    process_chunk, language, token
+                )
+                if detected_language is None and detected_lang:
+                    language = detected_lang
+
+                # Process transcript chunk
+                accumulated_text, chunks = self._process_transcript_chunk(
+                    transcript, accumulated_text, language, language
+                )
+                yield from chunks
+
+        # Process remaining audio
+        if audio_buffer:
+            transcript, detected_lang = self._transcribe_chunk(
+                bytes(audio_buffer), language, token
+            )
+            combined = accumulated_text + transcript
+            sentences = extract_sentences(combined)
+            for sentence in sentences[:-1]:
+                if sentence != accumulated_text:
+                    yield STTChunk(
+                        text=sentence,
+                        is_final=False,
+                        language=language or detected_language,
+                    )
+                    accumulated_text = sentence
+            accumulated_text = sentences[-1] if sentences else ""
+
+        # Emit final result
+        final_text = accumulated_text or combined
+        if final_text.strip():
+            yield STTChunk(
+                text=final_text,
+                is_final=True,
+                language=language,
+            )
 
     def detect_language(
         self,
@@ -269,10 +407,14 @@ class WhisperCppBackend(SubprocessBackend):
     def modality(self) -> str:
         return "stt"
 
+    @property
+    def _sample_rate(self) -> int:
+        return 16000
+
     def capabilities(self) -> ProviderCapabilities:
         from voicevision.core.protocols import ProviderCapabilities
         return ProviderCapabilities(
-            streaming=False,
+            streaming=True,
             languages=frozenset({"auto", "en", "pt", "es", "fr", "de", "it", "zh", "ja", "ko"}),
             models=frozenset({"tiny", "base", "small", "medium", "large"}),
             max_concurrent=1,
@@ -280,24 +422,41 @@ class WhisperCppBackend(SubprocessBackend):
         )
 
     def lifecycle(self) -> ProviderLifecycle:
-        return self  # SubprocessBackend has initialize/shutdown/health_check via run/close
+        return self
 
     def initialize(self) -> None:
-        """No-op: one-shot backend has no persistent state."""
         pass
 
     def shutdown(self) -> None:
-        """No-op: one-shot backend has no persistent state."""
         self.close()
 
     def health_check(self) -> bool:
         return self.available()
 
 
-DEFAULT_MODEL_NAME: Final = "whisper-base.bin"
+#: whisper.cpp prefixes each segment with `[00:00:00.000 --> 00:00:02.000]`.
+#: `-nt` suppresses these, but forks differ, so strip defensively rather than
+#: trust the flag was honoured.
+_TIMESTAMP = re.compile(r"^\s*\[[^\]]*-->[^\]]*\]\s*", re.MULTILINE)
+
+#: Some builds bracket non-speech markers such as `[BLANK_AUDIO]` or `(music)`.
+_BRACKETED = re.compile(r"\[[A-Z_]{3,}\]")
+
+#: Backends that write a transcript file instead of stdout put this on stdout.
+_FILE_WRITTEN = re.compile(r"^\s*.*\.txt\s*$", re.MULTILINE)
+
+#: Default sample rate for whisper.cpp
+DEFAULT_SAMPLE_RATE: Final = 16000
+
+#: Default chunk size for streaming (ms)
+DEFAULT_CHUNK_SIZE_MS: Final = 1500
+
+#: Default overlap between chunks (ms)
+DEFAULT_OVERLAP_MS: Final = 500
 
 
 # Forward reference for type hints
 class CancellationToken:
     """Forward reference."""
     def throw_if_cancelled(self) -> None: ...
+

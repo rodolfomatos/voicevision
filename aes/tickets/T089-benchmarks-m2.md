@@ -4,7 +4,7 @@ title: M2 Benchmarks — VAD, Wake Word, STT, TTS Latency
 sprint: M2-realtime-voice
 priority: high
 status: todo
-created: 2026-11-17
+created: 2026-11-18
 ---
 
 # T089 — M2 Benchmarks
@@ -40,10 +40,10 @@ M2.5 from architecture audit. Establish baseline metrics for M2 components befor
 
 ## Dependencies
 
-- T085 (sentence boundary) — for streaming TTS benchmark
-- T086 (adaptive VAD) — for VAD benchmark
-- T087 (barge-in) — for interruption latency benchmark
-- T088 (streaming STT) — for STT streaming benchmark
+- T085 (sentence boundary) — Done
+- T086 (adaptive VAD) — Done
+- T087 (barge-in) — Done
+- T088 (streaming STT) — In progress
 
 ## Rollback
 

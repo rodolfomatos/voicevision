@@ -12,10 +12,10 @@ status: active
 
 | ID | Title | Status |
 |----|-------|--------|
-| T085 | Sentence Boundary Detection (ends_sentence, spread_words, segments_from_words) | todo |
-| T086 | VAD Adaptativo (speech_islands, adaptive threshold) | todo |
-| T087 | Barge-in Detection + Interruption | todo |
-| T088 | Streaming STT (partial transcripts) | todo |
+| T085 | Sentence Boundary Detection (ends_sentence, spread_words, segments_from_words) | done |
+| T086 | VAD Adaptativo (speech_islands, adaptive threshold) | done |
+| T087 | Barge-in Detection + Interruption | done |
+| T088 | Streaming STT (partial transcripts) | in_progress |
 | T089 | M2 Benchmarks (VAD, Wake Word, STT, TTS, Pipeline) | todo |
 
 ## Retrospective

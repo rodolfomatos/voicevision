@@ -4,7 +4,7 @@ title: Streaming STT — Partial Transcripts
 sprint: M2-realtime-voice
 priority: high
 status: todo
-created: 2026-11-17
+created: 2026-11-18
 ---
 
 # T088 — Streaming STT (Partial Transcripts)
@@ -36,7 +36,8 @@ M2.4 from architecture audit. Current `WhisperCppBackend.transcribe_stream` buff
 ## Dependencies
 
 - T069-T074 (M1) — Done
-- Requires whisper.cpp fork with streaming support (check availability)
+- T085 (sentence boundary) — Done
+- T086 (adaptive VAD) — Done
 
 ## Rollback
 
