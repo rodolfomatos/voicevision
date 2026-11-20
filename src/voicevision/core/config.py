@@ -210,6 +210,8 @@ class PipelineConfig:
 
     # Emotion detection
     emotion_enabled: bool = False
+    emotion_backend: str = "simple"
+    emotion_params: dict[str, Any] = field(default_factory=dict)
 
     # Speaker identification
     speaker_enabled: bool = False
@@ -389,6 +391,8 @@ def create_pipeline_config_from_env() -> PipelineConfig:
         mute_tts=False,
         # Emotion/Speaker
         emotion_enabled=env_config.emotion_backend != "dummy",
+        emotion_backend=env_config.emotion_backend,
+        emotion_params=dict(env_config.emotion_params),
         speaker_enabled=env_config.speakerid_backend != "dummy",
         speakerid_backend=env_config.speakerid_backend,
         speakerid_params=dict(env_config.speakerid_params),

@@ -301,6 +301,7 @@ class ProviderRegistry:
         # Import here to avoid circular dependency
         from voicevision.backends import (
             LlamaCppBackend,
+            MLEmotionBackend,
             MoondreamBackend,
             OnnxVisionBackend,
             PiperBackend,
@@ -384,14 +385,23 @@ class ProviderRegistry:
                     port=config.vision_port,
                 )
 
-        # Emotion
+        # Emotion (T093: keyword fallback or transformer-based classifier)
         if config.emotion_enabled:
-            registry.register_class(
-                "emotion",
-                "simple",
-                SimpleEmotionBackend,
-                default=True,
-            )
+            if config.emotion_backend == "ml":
+                registry.register_class(
+                    "emotion",
+                    "ml",
+                    MLEmotionBackend,
+                    default=True,
+                    **config.emotion_params,
+                )
+            else:
+                registry.register_class(
+                    "emotion",
+                    "simple",
+                    SimpleEmotionBackend,
+                    default=True,
+                )
 
         # Speaker ID (T092: simple feature-based fallback or pyannote embeddings)
         if config.speaker_enabled:

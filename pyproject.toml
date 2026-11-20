@@ -35,7 +35,7 @@ dependencies = [
 vad = ["webrtcvad-wheels>=2.0"]
 audio = ["sounddevice>=0.4.6"]
 
-all = ["webrtcvad-wheels>=2.0", "sounddevice>=0.4.6", "pyannote.audio>=3.1"]
+all = ["webrtcvad-wheels>=2.0", "sounddevice>=0.4.6", "pyannote.audio>=3.1", "transformers>=4.40"]
 
 # LLM backends
 ollama = ["httpx>=0.27"]
@@ -50,6 +50,9 @@ piper = []
 
 # Speaker ID (T092) — heavy optional stack, never imported by the core.
 speaker = ["pyannote.audio>=3.1"]
+
+# Emotion detection (T093) — transformer models, lazily imported.
+emotion = ["transformers>=4.40"]
 
 # Vision backends
 # Moondream via GGUF + llama.cpp — NOT torch/transformers.
@@ -133,7 +136,7 @@ ignore_missing_imports = true  # chaquopy not available in standard env
 [[tool.mypy.overrides]]
 # Optional runtime dependencies: absent from a minimal install, so mypy must
 # not fail on their missing stubs. The code imports them lazily.
-module = ["webrtcvad", "httpx", "playwright", "playwright.*", "onnxruntime", "PIL", "sounddevice", "pvporcupine", "pyannote", "pyannote.*", "torch"]
+module = ["webrtcvad", "httpx", "playwright", "playwright.*", "onnxruntime", "PIL", "sounddevice", "pvporcupine", "pyannote", "pyannote.*", "torch", "transformers"]
 ignore_missing_imports = true
 
 [tool.bandit]

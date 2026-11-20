@@ -8,6 +8,7 @@ from voicevision.backends.emotion import (
     detect_emotion,
     get_emotion_backend,
 )
+from voicevision.backends.emotion_ml import MLEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
 from voicevision.backends.onnx_vision import OnnxVisionBackend
 from voicevision.backends.piper import PiperBackend
@@ -43,6 +44,7 @@ __all__ = [
     "MoondreamBackend",
     "OnnxVisionBackend",
     "SimpleEmotionBackend",
+    "MLEmotionBackend",
     "EmotionResult",
     "detect_emotion",
     "get_emotion_backend",

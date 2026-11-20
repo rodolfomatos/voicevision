@@ -228,6 +228,19 @@ class TestProviderRegistryConfigFactory:
         assert registry.is_registered("speakerid", "pyannote")
         registry.shutdown_all()
 
+    def test_create_from_config_registers_ml_emotion(self) -> None:
+        """T093: the ML emotion backend is selectable via the config factory."""
+        from voicevision.core.config import PipelineConfig
+
+        config = PipelineConfig(
+            emotion_enabled=True,
+            emotion_backend="ml",
+            emotion_params={"taxonomy": "plutchik"},
+        )
+        registry = ProviderRegistry.get_instance().create_from_config(config)
+        assert registry.is_registered("emotion", "ml")
+        registry.shutdown_all()
+
 
 class TestBackwardsCompatibility:
     """Test BackendRegistry wrapper for backwards compatibility."""

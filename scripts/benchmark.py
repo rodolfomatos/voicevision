@@ -7,6 +7,7 @@ Measures latency, accuracy, and resource usage for:
 - STT (whisper.cpp)
 - TTS (piper)
 - Speaker ID (pyannote-compatible embeddings, T092)
+- Emotion detection (ML vs keyword accuracy, text/audio latency, T093)
 - Full pipeline (VAD → STT → LLM → TTS)
 
 Usage:
@@ -354,6 +355,94 @@ class BenchmarkRunner:
             ))
         return results
 
+    # T093 — labelled corpus with one dominant emotion per utterance.
+    _EMOTION_CORPUS: tuple[tuple[str, str], ...] = (
+        ("I am so happy and excited about the wonderful news", "joy"),
+        ("This makes me furious and angry", "anger"),
+        ("I am terrified and scared of what might happen", "fear"),
+        ("She felt sad and lonely after the loss", "sadness"),
+        ("What a disgusting and revolting sight", "disgust"),
+        ("Wow, I did not expect that at all", "surprise"),
+    )
+    _EMOTION_LEXICON: dict[str, tuple[str, ...]] = {
+        "joy": ("happy", "excited", "wonderful"),
+        "anger": ("furious", "angry"),
+        "fear": ("terrified", "scared"),
+        "sadness": ("sad", "lonely"),
+        "disgust": ("disgusting", "revolting"),
+        "surprise": ("wow", "expect"),
+    }
+
+    @classmethod
+    def _emotion_classifier(cls, text: str) -> dict[str, float]:
+        """Deterministic ML stand-in: score each emotion by keyword hits."""
+        words = set(text.lower().split())
+        hits = {
+            label: sum(word in words for word in keywords)
+            for label, keywords in cls._EMOTION_LEXICON.items()
+        }
+        total = sum(hits.values())
+        if total == 0:
+            return {"neutral": 1.0}
+        return {label: value / total for label, value in hits.items() if value}
+
+    def benchmark_emotion(self) -> list[BenchmarkResult]:
+        """T093 — ML vs keyword accuracy, plus text/audio detection latency.
+
+        An injected classifier keeps this runnable without a model download;
+        the keyword baseline uses the shipped :class:`SimpleEmotionBackend`.
+        """
+        from voicevision.backends.emotion import SimpleEmotionBackend
+        from voicevision.backends.emotion_ml import MLEmotionBackend
+
+        ml = MLEmotionBackend(text_classifier=self._emotion_classifier)
+        keyword = SimpleEmotionBackend()
+        # Map the keyword backend's sentiment labels onto the Ekman taxonomy.
+        sentiment_to_ekman = {"positive": "joy", "negative": "sadness"}
+
+        results: list[BenchmarkResult] = []
+        for backend_name, backend in (("ml", ml), ("keyword", keyword)):
+            correct = 0
+            for text, expected in self._EMOTION_CORPUS:
+                label = backend.detect(text).label
+                if backend_name == "keyword":
+                    label = sentiment_to_ekman.get(label, label)
+                correct += label == expected
+            results.append(BenchmarkResult(
+                component="emotion",
+                metric="text_accuracy",
+                value=correct / len(self._EMOTION_CORPUS),
+                unit="ratio",
+                conditions={"backend": backend_name, "samples": len(self._EMOTION_CORPUS)},
+            ))
+
+        text = self._EMOTION_CORPUS[0][0]
+        for _ in range(self.iterations):
+            _, latency = self._time_it(ml.detect, text)
+            results.append(BenchmarkResult(
+                component="emotion",
+                metric="text_detection_latency",
+                value=latency * 1000,
+                unit="ms",
+                conditions={"backend": "ml"},
+            ))
+
+        audio_ml = MLEmotionBackend(
+            text_classifier=self._emotion_classifier,
+            audio_classifier=lambda _audio, _rate: {"joy": 0.9, "surprise": 0.1},
+        )
+        audio = self._speaker_tone(440.0, duration_ms=1000)
+        for _ in range(self.iterations):
+            _, latency = self._time_it(audio_ml.detect_audio, audio)
+            results.append(BenchmarkResult(
+                component="emotion",
+                metric="audio_detection_latency",
+                value=latency * 1000,
+                unit="ms",
+                conditions={"backend": "ml", "audio_duration_s": 1.0},
+            ))
+        return results
+
     def benchmark_pipeline(self, config: PipelineConfig) -> list[BenchmarkResult]:
         """Benchmark full pipeline latency."""
         results = []
@@ -416,6 +505,9 @@ class BenchmarkRunner:
 
         # Speaker ID benchmarks (T092 — no model download required)
         self.results.extend(self.benchmark_speaker())
+
+        # Emotion benchmarks (T093 — no model download required)
+        self.results.extend(self.benchmark_emotion())
 
         # STT benchmarks
         if "stt" in model_paths:

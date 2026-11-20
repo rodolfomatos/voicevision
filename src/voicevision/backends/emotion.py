@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from voicevision.core.cancellation import CancellationToken
 from voicevision.core.protocols import EmotionResult, ProviderCapabilities, ProviderLifecycle
 
 
@@ -184,6 +185,20 @@ class SimpleEmotionBackend:
             return EmotionResult(label="negative", score=confidence)
         return EmotionResult(label="neutral", score=0.5)
 
+    def detect_audio(
+        self,
+        audio: bytes,
+        *,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> EmotionResult:
+        """Keyword backend is text-only; use the ML backend for audio."""
+        if token is not None:
+            token.throw_if_cancelled()
+        raise NotImplementedError(
+            "SimpleEmotionBackend is text-only; use MLEmotionBackend for audio"
+        )
+
     # -- Provider protocol -----------------------------------------------------
 
     @property
@@ -232,9 +247,3 @@ def get_emotion_backend() -> SimpleEmotionBackend:
 def detect_emotion(text: str) -> EmotionResult:
     """Convenience function to detect emotion using the default backend."""
     return get_emotion_backend().detect(text)
-
-
-# Forward reference for type hints
-class CancellationToken:
-    """Forward reference."""
-    def throw_if_cancelled(self) -> None: ...

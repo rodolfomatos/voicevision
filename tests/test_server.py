@@ -844,3 +844,94 @@ class TestMain:
         with pytest.raises(SystemExit):
             main()
         assert captured["config"].port == 9100
+
+
+class TestEmotionBackendSelection:
+    """T093 — the server honours the configured emotion backend."""
+
+    @staticmethod
+    def _live_with_config(**overrides: Any) -> tuple[Any, FakeService, threading.Thread]:
+        service = FakeService()
+        server = create_server(_config(**overrides), service=service)  # type: ignore[arg-type]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, service, thread
+
+    @staticmethod
+    def _stop(server: Any, thread: threading.Thread) -> None:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    def test_simple_backend_adds_emotion(self) -> None:
+        server, _service, thread = self._live_with_config(
+            emotion_enabled=True, emotion_backend="simple"
+        )
+        try:
+            status, _headers, body = _request(
+                server,
+                "POST",
+                "/transcribe",
+                body={"audio_base64": _audio_b64(b"\x00\x00" * 100)},
+            )
+            assert status == 200
+            emotion = _json(body)["emotion"]
+            assert set(emotion) == {"label", "score"}
+            assert emotion["label"] in {"positive", "negative", "neutral"}
+        finally:
+            self._stop(server, thread)
+
+    def test_ml_backend_is_used_when_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from voicevision.core.protocols import EmotionResult
+
+        class FakeML:
+            def initialize(self) -> None:
+                return None
+
+            def detect(self, text: str, **kwargs: object) -> EmotionResult:
+                return EmotionResult("joy", 0.9, {"joy": 0.9, "surprise": 0.1})
+
+        monkeypatch.setattr("voicevision.server.MLEmotionBackend", FakeML)
+        server, _service, thread = self._live_with_config(
+            emotion_enabled=True, emotion_backend="ml"
+        )
+        try:
+            status, _headers, body = _request(
+                server,
+                "POST",
+                "/transcribe",
+                body={"audio_base64": _audio_b64(b"\x00\x00" * 100)},
+            )
+            assert status == 200
+            emotion = _json(body)["emotion"]
+            assert emotion["label"] == "joy"
+            assert emotion["scores"] == {"joy": 0.9, "surprise": 0.1}
+        finally:
+            self._stop(server, thread)
+
+    def test_unavailable_ml_backend_skips_emotion(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from voicevision.errors import BackendNotAvailableError
+
+        class UnavailableML:
+            def initialize(self) -> None:
+                raise BackendNotAvailableError("transformers", "not installed")
+
+        monkeypatch.setattr("voicevision.server.MLEmotionBackend", UnavailableML)
+        server, _service, thread = self._live_with_config(
+            emotion_enabled=True, emotion_backend="ml"
+        )
+        try:
+            status, _headers, body = _request(
+                server,
+                "POST",
+                "/transcribe",
+                body={"audio_base64": _audio_b64(b"\x00\x00" * 100)},
+            )
+            assert status == 200
+            assert "emotion" not in _json(body)
+        finally:
+            self._stop(server, thread)

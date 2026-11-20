@@ -41,13 +41,14 @@ from urllib.parse import urlsplit
 from voicevision import __version__
 from voicevision.audio import pcm16_to_wav, require_whisper_format
 from voicevision.backends.emotion import SimpleEmotionBackend
+from voicevision.backends.emotion_ml import MLEmotionBackend
 from voicevision.backends.llama_cpp import LlamaCppBackend
 from voicevision.backends.onnx_vision import OnnxVisionBackend
 from voicevision.backends.speaker import SimpleSpeakerBackend
 from voicevision.backends.vision import MoondreamBackend
 from voicevision.backends.whisper_cpp import WhisperCppBackend
-from voicevision.core.protocols import STTChunk
-from voicevision.errors import ConfigurationError, VoiceVisionError
+from voicevision.core.protocols import EmotionProvider, STTChunk
+from voicevision.errors import BackendNotAvailableError, ConfigurationError, VoiceVisionError
 from voicevision.websocket import (
     CLOSE_INVALID_DATA,
     CLOSE_UNSUPPORTED,
@@ -137,6 +138,7 @@ class ServerConfig:
 
     # Emotion detection
     emotion_enabled: bool = False
+    emotion_backend: str = "simple"
 
     # Speaker identification
     speaker_enabled: bool = False
@@ -186,6 +188,7 @@ def load_config() -> ServerConfig:
         vision_port=_env_int("VOICEVISION_VISION_PORT", 8081),
         vision_backend=os.environ.get("VOICEVISION_VISION_BACKEND", "llama-cpp"),
         emotion_enabled=_env_bool("VOICEVISION_EMOTION", False),
+        emotion_backend=os.environ.get("VOICEVISION_EMOTION_BACKEND", "simple"),
         speaker_enabled=_env_bool("VOICEVISION_SPEAKER", False),
 
         # TTS
@@ -409,6 +412,28 @@ class _RequestHandler(BaseHTTPRequestHandler):
     def _config(self) -> ServerConfig:
         return cast(VoiceVisionHTTPServer, self.server).config
 
+    def _emotion_provider(self) -> EmotionProvider | None:
+        """Build the configured emotion backend, or None if it is unavailable."""
+        if self._config.emotion_backend == "ml":
+            provider = MLEmotionBackend()
+            try:
+                provider.initialize()
+            except BackendNotAvailableError:
+                return None
+            return provider
+        return SimpleEmotionBackend()
+
+    def _emotion_payload(self, text: str) -> dict[str, Any] | None:
+        """Detect emotion with the configured backend, including multi-label scores."""
+        provider = self._emotion_provider()
+        if provider is None:
+            return None
+        emotion = provider.detect(text)
+        payload: dict[str, Any] = {"label": emotion.label, "score": emotion.score}
+        if emotion.scores:
+            payload["scores"] = emotion.scores
+        return payload
+
     # -- routing ----------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802 - name required by BaseHTTPRequestHandler
@@ -491,8 +516,9 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
         # Emotion detection
         if self._config.emotion_enabled:
-            emotion = SimpleEmotionBackend().detect(transcript)
-            result["emotion"] = {"label": emotion.label, "score": emotion.score}
+            emotion = self._emotion_payload(transcript)
+            if emotion is not None:
+                result["emotion"] = emotion
 
         # Speaker identification
         if self._config.speaker_enabled:
@@ -531,8 +557,9 @@ class _RequestHandler(BaseHTTPRequestHandler):
 
         # Emotion detection on the response
         if self._config.emotion_enabled:
-            emotion = SimpleEmotionBackend().detect(response)
-            result["emotion"] = {"label": emotion.label, "score": emotion.score}
+            emotion = self._emotion_payload(response)
+            if emotion is not None:
+                result["emotion"] = emotion
 
         return result
 

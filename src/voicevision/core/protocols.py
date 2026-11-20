@@ -9,7 +9,7 @@ Version: 2.0.0 (M1 Core Abstraction)
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Generator, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 # Import the real CancellationToken to avoid type mismatch with implementations
@@ -662,12 +662,24 @@ class EmotionProvider(Provider, Protocol):
         """
         ...
 
+    def detect_audio(
+        self,
+        audio: bytes,
+        *,
+        sample_rate: int = 16000,
+        token: CancellationToken | None = None,
+    ) -> EmotionResult:
+        """Detect emotion from PCM16 audio (T093)."""
+        ...
+
 
 @dataclass(frozen=True)
 class EmotionResult:
     """Result of emotion detection."""
     label: str  # positive, negative, neutral, etc.
     score: float  # 0.0 - 1.0
+    # Confidence for every considered emotion (multi-label support, T093).
+    scores: dict[str, float] = field(default_factory=dict)
 
 
 # =============================================================================

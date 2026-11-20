@@ -157,6 +157,9 @@ class DummyEmotion(_base_provider_methods("dummy", "emotion")):
     def detect(self, text: str, **kwargs: object) -> EmotionResult:
         return EmotionResult(label="neutral", score=0.5)
 
+    def detect_audio(self, audio: bytes, **kwargs: object) -> EmotionResult:
+        return EmotionResult(label="neutral", score=0.5)
+
 
 class TestProtocols:
     """Verify Protocol structural subtyping works."""
