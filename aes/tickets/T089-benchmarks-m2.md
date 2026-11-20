@@ -43,7 +43,7 @@ M2.5 from architecture audit. Establish baseline metrics for M2 components befor
 - T085 (sentence boundary) — Done
 - T086 (adaptive VAD) — Done
 - T087 (barge-in) — Done
-- T088 (streaming STT) — In progress
+- T088 (streaming STT) — Done
 
 ## Rollback
 
